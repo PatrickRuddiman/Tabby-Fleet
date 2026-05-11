@@ -1,0 +1,15 @@
+{
+  "name": "tabby-fleet",
+  "version": "0.1.0",
+  "description": "Tabby Terminal plugin: one tab per git repo, one pane per worktree, one agent per pane.",
+  "keywords": [
+    "tabby-plugin"
+  ],
+  "main": "dist/index.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PatrickRuddiman/Tabby-Fleet.git"
+  },
+  "author": "Patrick Ruddiman"
+}
