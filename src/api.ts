@@ -1,3 +1,80 @@
-// Shared types live here. Filled in by tasks 012 (AgentFleetProfileOptions)
-// and 013 (FleetPaneMetadata, RecoveryToken types).
-export {}
+// Shared types for the tabby-fleet plugin. Consumed by ProfileProvider,
+// FleetController, settings UI, and the recovery provider.
+
+export type LayoutMode = 'grid' | 'static-grid'
+export type WatchMode = 'fs' | 'poll' | 'off'
+export type SpawnMode = 'eager' | 'lazy'
+export type EncodingMode = 'encoded' | 'command'
+
+/**
+ * The 27 fields a developer configures per profile (and as a global default
+ * under config.store.fleet.defaults). Every field is required; defaults live
+ * in DEFAULT_PROFILE_OPTIONS.
+ */
+export interface AgentFleetProfileOptions {
+  // Repo + worktree filtering
+  repoPath: string
+  worktreePathPrefix: string
+  includeDetached: boolean
+  includePrunable: boolean
+  includeLocked: boolean
+  // Command + title templates
+  rootCommandTemplate: string
+  rootTitle: string
+  commandTemplate: string
+  paneTitlePattern: string
+  // Optional pane colors (hex string or null)
+  rootColor: string | null
+  paneColor: string | null
+  // Layout
+  layoutMode: LayoutMode
+  zoomFactor: number
+  minPaneWidth: number
+  minPaneHeight: number
+  zoomTransitionMs: number
+  // Watcher
+  watchMode: WatchMode
+  pollIntervalMs: number
+  autoOpenNew: boolean
+  autoCloseRemoved: boolean
+  // Notifications + focus
+  stealFocusOnAdd: boolean
+  notifyOnChange: boolean
+  // Spawn behaviour + pre-launch hook
+  spawnMode: SpawnMode
+  preSpawnCommand: string
+  // Shell that hosts each pane's command
+  shell: string
+  shellArgs: string[]
+  encoding: EncodingMode
+}
+
+export const DEFAULT_PROFILE_OPTIONS: AgentFleetProfileOptions = {
+  repoPath: '',
+  worktreePathPrefix: '.claude/worktrees/',
+  includeDetached: false,
+  includePrunable: false,
+  includeLocked: true,
+  rootCommandTemplate: 'claude',
+  rootTitle: '{repo} (orchestrator)',
+  commandTemplate: 'claude --resume {branch}',
+  paneTitlePattern: '{branch_short}',
+  rootColor: null,
+  paneColor: null,
+  layoutMode: 'grid',
+  zoomFactor: 2.0,
+  minPaneWidth: 120,
+  minPaneHeight: 80,
+  zoomTransitionMs: 150,
+  watchMode: 'fs',
+  pollIntervalMs: 5000,
+  autoOpenNew: true,
+  autoCloseRemoved: true,
+  stealFocusOnAdd: false,
+  notifyOnChange: true,
+  spawnMode: 'eager',
+  preSpawnCommand: '',
+  shell: 'pwsh.exe',
+  shellArgs: ['-NoExit', '-EncodedCommand'],
+  encoding: 'encoded',
+}
