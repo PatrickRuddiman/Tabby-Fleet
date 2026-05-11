@@ -1,0 +1,6 @@
+.fleet-overlay
+  .fleet-overlay-card
+    h4.fleet-overlay-title {{ paneTitle }}
+    p.text-muted Command:
+    pre.fleet-overlay-cmd {{ command }}
+    button.btn.btn-primary(type='button' (click)='relaunch()') Relaunch
