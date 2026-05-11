@@ -83,6 +83,10 @@ declare module 'tabby-settings' {
   }
 }
 
+declare module '@angular/forms' {
+  export class FormsModule {}
+}
+
 declare module '@ng-bootstrap/ng-bootstrap' {
   export class NgbModal {
     open(content: any, options?: any): NgbModalRef
