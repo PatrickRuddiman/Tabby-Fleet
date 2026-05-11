@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { NgModule } from '@angular/core'
+import './styles/fleet-transition.scss'
 
 /**
  * Plugin entry point. Imports/declarations/providers stay empty here; task 022
