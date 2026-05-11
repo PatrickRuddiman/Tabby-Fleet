@@ -24,6 +24,7 @@
     "css-loader": "^6.11.0",
     "mocha": "^10.8.2",
     "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
     "sass": "^1.99.0",
     "sass-loader": "^13.3.3",
     "style-loader": "^3.3.4",

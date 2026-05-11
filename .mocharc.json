@@ -1,6 +1,6 @@
 {
   "extensions": ["ts"],
   "spec": ["tests/**/*.test.ts"],
-  "require": ["reflect-metadata", "ts-node/register", "./tests/setup/scss-stub.js"],
+  "require": ["reflect-metadata", "ts-node/register/transpile-only", "./tests/setup/scss-stub.js"],
   "reporter": "spec"
 }
