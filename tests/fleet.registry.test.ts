@@ -1,9 +1,40 @@
 import { strict as assert } from 'assert'
+import { execSync } from 'child_process'
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
 import { SplitTabComponent } from 'tabby-core'
 import { FleetController, FleetRegistry } from '../src/services/fleet.registry'
 import { DEFAULT_PROFILE_OPTIONS } from '../src/api'
 import { Worktree } from '../src/utils/porcelain'
 import { RepoInfo } from '../src/utils/vars'
+
+const GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'test',
+  GIT_AUTHOR_EMAIL: 'test@example.com',
+  GIT_COMMITTER_NAME: 'test',
+  GIT_COMMITTER_EMAIL: 'test@example.com',
+}
+
+function createTempRepo(): string {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-ctl-')))
+  execSync('git init -b main', { cwd: dir, env: GIT_ENV, stdio: 'pipe' })
+  execSync('git commit --allow-empty -m initial', { cwd: dir, env: GIT_ENV, stdio: 'pipe' })
+  return dir
+}
+
+function cleanupTempDir(dir: string): void {
+  try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* noop */ }
+}
+
+function addWorktreeOnDisk(repo: string, name: string): void {
+  execSync(`git worktree add .claude/worktrees/${name} -b agent/${name}`, {
+    cwd: repo,
+    env: GIT_ENV,
+    stdio: 'pipe',
+  })
+}
 
 const REPO: RepoInfo = {
   name: 'wineapi',
@@ -115,6 +146,145 @@ describe('fleet.registry', () => {
       const c2 = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1')
       assert.equal(c1, c2)
       assert.equal(registry.size(), 1)
+    })
+  })
+
+  describe('FleetController lifecycle (task 021 extensions)', () => {
+    let registry: FleetRegistry
+    let splitTab: SplitTabComponent
+    let repoDir = ''
+    let notifications: any
+
+    beforeEach(() => {
+      registry = new FleetRegistry()
+      splitTab = new SplitTabComponent()
+      repoDir = createTempRepo()
+      notifications = { calls: [] as any[] }
+      notifications.info = (text: string, details?: string) => notifications.calls.push({ kind: 'info', text, details })
+      notifications.error = (text: string, details?: string) => notifications.calls.push({ kind: 'error', text, details })
+      notifications.notice = (text: string) => notifications.calls.push({ kind: 'notice', text })
+    })
+
+    afterEach(() => {
+      cleanupTempDir(repoDir)
+    })
+
+    it('launch with a valid repo + 2 worktrees creates 3 panes', async () => {
+      addWorktreeOnDisk(repoDir, 'feature-a')
+      addWorktreeOnDisk(repoDir, 'feature-b')
+      const controller = registry.register(
+        splitTab,
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, watchMode: 'off' },
+        'p1',
+        { notifications },
+      )
+      await controller.launch()
+      assert.equal(controller.paneRegistry.size, 3)
+      const roles = [...controller.paneRegistry.values()].map(e => e.role).sort()
+      assert.deepEqual(roles, ['root', 'worktree', 'worktree'])
+    })
+
+    it('launch with an invalid repo path aborts (no panes opened)', async () => {
+      const controller = registry.register(
+        splitTab,
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: '/definitely/not/a/real/path/xyz123', watchMode: 'off' },
+        'p1',
+        { notifications },
+      )
+      await controller.launch()
+      assert.equal(controller.paneRegistry.size, 0)
+      const err = notifications.calls.find((c: any) => c.kind === 'error')
+      assert.ok(err, 'expected an error notification on invalid repo path')
+    })
+
+    it('launch aborts when preSpawnCommand exits non-zero', async () => {
+      const controller = registry.register(
+        splitTab,
+        {
+          ...DEFAULT_PROFILE_OPTIONS,
+          repoPath: repoDir,
+          preSpawnCommand: 'node -e "process.exit(1)"',
+          watchMode: 'off',
+        },
+        'p1',
+        { notifications },
+      )
+      await controller.launch()
+      assert.equal(controller.paneRegistry.size, 0)
+      const err = notifications.calls.find((c: any) => c.kind === 'error' && c.text === 'Pre-launch command failed')
+      assert.ok(err, 'expected pre-launch-command-failed notification')
+    })
+
+    it('onWatcherChange adds a newly-appearing worktree pane', async () => {
+      const controller = registry.register(
+        splitTab,
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, watchMode: 'off', notifyOnChange: false },
+        'p1',
+        { notifications },
+      )
+      await controller.launch()
+      assert.equal(controller.paneRegistry.size, 1) // root only
+
+      addWorktreeOnDisk(repoDir, 'new-thing')
+      await controller.onWatcherChange()
+      assert.equal(controller.paneRegistry.size, 2)
+    })
+
+    it('dismissPane sets userDismissed and onWatcherChange does NOT re-open the pane', async () => {
+      addWorktreeOnDisk(repoDir, 'dismissable')
+      const controller = registry.register(
+        splitTab,
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, watchMode: 'off', notifyOnChange: false },
+        'p1',
+        { notifications },
+      )
+      await controller.launch()
+      assert.equal(controller.paneRegistry.size, 2)
+      const wtEntry = [...controller.paneRegistry.values()].find(e => e.role === 'worktree')!
+      controller.dismissPane(wtEntry.worktreePath)
+      assert.equal(controller.userDismissed.has(wtEntry.worktreePath), true)
+      assert.equal(controller.paneRegistry.size, 1)
+
+      // Watcher fires (worktree still on disk) — must NOT re-add the dismissed path.
+      await controller.onWatcherChange()
+      assert.equal(controller.paneRegistry.size, 1)
+    })
+
+    it('confirmRootClose opens the modal and resolves true when result is true', async () => {
+      const modal = {
+        opens: 0,
+        open() {
+          this.opens++
+          return { componentInstance: {}, result: Promise.resolve(true) }
+        },
+      }
+      const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1', { modal: modal as any })
+      const result = await controller.confirmRootClose()
+      assert.equal(modal.opens, 1)
+      assert.equal(result, true)
+    })
+
+    it('relaunchPane clears the recovered flag and destroys the overlay', async () => {
+      const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1')
+      let destroyCalls = 0
+      controller.paneRegistry.set('paneX', {
+        paneId: 'paneX',
+        pane: {},
+        role: 'worktree',
+        worktreePath: '/repo/.claude/worktrees/x',
+        branch: 'agent/x',
+        command: 'claude --resume agent/x',
+        title: 'x',
+        color: null,
+        recovered: true,
+        baselineWeight: 1,
+        overlayRef: { destroy: () => { destroyCalls++ } },
+      })
+      await controller.relaunchPane('paneX')
+      const entry = controller.paneRegistry.get('paneX')!
+      assert.equal(entry.recovered, false)
+      assert.equal(entry.overlayRef, null)
+      assert.equal(destroyCalls, 1)
     })
   })
 })

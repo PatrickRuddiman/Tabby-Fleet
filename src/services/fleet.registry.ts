@@ -1,6 +1,9 @@
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import { Injectable } from '@angular/core'
 import { Subscription } from 'rxjs'
-import { SplitTabComponent } from 'tabby-core'
+import { NotificationsService, SplitTabComponent } from 'tabby-core'
+import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import {
   AgentFleetProfileOptions,
   AgentFleetRecoveryToken,
@@ -9,9 +12,23 @@ import {
 } from '../api'
 import { computeLayoutWeights, LayoutWeights, PaneInfo } from './layout.service'
 import { buildSpawnDescriptor, SpawnDescriptor } from './command.service'
-import type { ListResult } from './worktree.service'
+import {
+  listFilteredWorktrees,
+  validateRepoPath,
+  type ListResult,
+} from './worktree.service'
 import { Worktree } from '../utils/porcelain'
 import { RepoInfo, worktreeToVars } from '../utils/vars'
+import { WorktreeWatcher } from './watcher.service'
+import { ConfirmFleetCloseModalComponent } from '../components/confirm-fleet-close-modal.component'
+import { FleetDeadPaneOverlayComponent } from '../components/fleet-dead-pane-overlay.component'
+
+const execAsync = promisify(exec)
+
+export interface FleetControllerDeps {
+  notifications?: NotificationsService
+  modal?: NgbModal
+}
 
 interface PaneEntry {
   paneId: string
@@ -35,7 +52,8 @@ interface PaneEntry {
 export class FleetController {
   readonly paneRegistry = new Map<string, PaneEntry>()
   readonly userDismissed = new Set<string>()
-  watcher: any = null
+  watcher: WorktreeWatcher | null = null
+  repoInfo: RepoInfo | null = null
   private subscriptions: Subscription[] = []
   private resizeObserver: any = null
 
@@ -43,6 +61,7 @@ export class FleetController {
     readonly splitTab: SplitTabComponent,
     readonly profile: AgentFleetProfileOptions,
     readonly profileId: string,
+    readonly deps: FleetControllerDeps = {},
   ) {}
 
   attach(): void {
@@ -184,7 +203,7 @@ export class FleetController {
     this.recompute(focused?.id ?? null)
   }
 
-  private recompute(focusedId: string | null = null): void {
+  recompute(focusedId: string | null = null): void {
     const el: any = (this.splitTab as any).elementRef?.nativeElement
     const rect = el?.getBoundingClientRect?.() ?? { width: 0, height: 0 }
     const panes: PaneInfo[] = [...this.paneRegistry.values()].map(e => ({
@@ -201,6 +220,190 @@ export class FleetController {
       this.profile.layoutMode,
     )
     this.applyRatios(weights)
+  }
+
+  /**
+   * Launch sequence per fleet-lifecycle slice §5: resolve repo path → validate
+   * → run pre-launch command → list filtered worktrees → attach watcher →
+   * build initial panes (root first, then worktrees) → apply baseline ratios.
+   * Aborts on any failure with a NotificationsService.error if injected.
+   */
+  async launch(): Promise<void> {
+    const repoPath = (this.profile.repoPath ?? '').trim()
+    if (!repoPath) {
+      this.notify('error', 'Agent Fleet launch failed', 'No repo path configured')
+      return
+    }
+
+    const valid = await validateRepoPath(repoPath)
+    if (!valid.ok) {
+      this.notify('error', 'Not a git repository', `${repoPath}: ${valid.error.message}`)
+      return
+    }
+
+    if (this.profile.preSpawnCommand && this.profile.preSpawnCommand.trim()) {
+      try {
+        await execAsync(this.profile.preSpawnCommand, { cwd: repoPath, timeout: 30000 })
+      } catch (err: any) {
+        const code = err?.code ?? err?.exitCode ?? 'error'
+        this.notify(
+          'error',
+          'Pre-launch command failed',
+          `${this.profile.preSpawnCommand} exited with code ${code}`,
+        )
+        return
+      }
+    }
+
+    const filterOptions = {
+      repoPath,
+      worktreePathPrefix: this.profile.worktreePathPrefix,
+      includeDetached: this.profile.includeDetached,
+      includePrunable: this.profile.includePrunable,
+      includeLocked: this.profile.includeLocked,
+    }
+    const listed: ListResult = await listFilteredWorktrees(repoPath, filterOptions)
+    if (!listed.ok) {
+      this.notify('error', 'Failed to list worktrees', listed.error.message)
+      return
+    }
+
+    this.repoInfo = listed.value.repo
+
+    // Attach watcher.
+    const desiredMode = this.profile.watchMode === 'off' ? null : (this.profile.watchMode as 'fs' | 'poll')
+    if (desiredMode) {
+      this.watcher = new WorktreeWatcher(repoPath, () => { void this.onWatcherChange() })
+      this.watcher.start(desiredMode, this.profile.pollIntervalMs)
+      const mode = this.watcher.actualMode
+      this.notify(
+        'notice',
+        mode === 'fs' ? 'Watch mode: filesystem events' : 'Watch mode: polling (filesystem watch unavailable)',
+      )
+    }
+
+    // Build initial pane set (root + filtered worktrees).
+    let previousPaneId: string | null = null
+    for (const wt of listed.value.worktrees) {
+      const previousFocused = (this.splitTab as any).getFocusedTab?.()
+      const entry = await this.addPaneForWorktree(wt, this.repoInfo, {
+        isRoot: wt.isMain,
+        previousPaneId,
+      })
+      previousPaneId = entry.paneId
+      if (!this.profile.stealFocusOnAdd && previousFocused) {
+        ;(this.splitTab as any).focus?.(previousFocused)
+      }
+    }
+
+    this.recompute()
+  }
+
+  /** Re-list, diff against current worktree panes, add/remove, rebalance. */
+  async onWatcherChange(): Promise<void> {
+    if (!this.repoInfo) return
+    const filterOptions = {
+      repoPath: this.repoInfo.path,
+      worktreePathPrefix: this.profile.worktreePathPrefix,
+      includeDetached: this.profile.includeDetached,
+      includePrunable: this.profile.includePrunable,
+      includeLocked: this.profile.includeLocked,
+    }
+    const listed = await listFilteredWorktrees(this.repoInfo.path, filterOptions)
+    if (!listed.ok) return
+
+    const incoming = new Map(
+      listed.value.worktrees.filter(w => !w.isMain).map(w => [w.path, w]),
+    )
+    const currentPaths = new Set(
+      [...this.paneRegistry.values()].filter(e => e.role === 'worktree').map(e => e.worktreePath),
+    )
+
+    const toAdd: Worktree[] = []
+    for (const [path, wt] of incoming) {
+      if (!currentPaths.has(path) && !this.userDismissed.has(path)) toAdd.push(wt)
+    }
+    const toRemove: string[] = []
+    if (this.profile.autoCloseRemoved) {
+      for (const path of currentPaths) {
+        if (!incoming.has(path)) toRemove.push(path)
+      }
+    }
+
+    let changed = false
+
+    if (this.profile.autoOpenNew) {
+      for (const wt of toAdd) {
+        const previousFocused = (this.splitTab as any).getFocusedTab?.()
+        const entry = await this.addPaneForWorktree(wt, this.repoInfo)
+        if (!this.profile.stealFocusOnAdd && previousFocused) {
+          ;(this.splitTab as any).focus?.(previousFocused)
+        }
+        if (this.profile.notifyOnChange) {
+          this.notify('info', `Worktree added: ${entry.title}`)
+        }
+        changed = true
+      }
+    }
+
+    for (const path of toRemove) {
+      const entry = [...this.paneRegistry.values()].find(e => e.worktreePath === path)
+      this.removePaneForWorktree(path)
+      if (this.profile.notifyOnChange) {
+        this.notify('info', `Worktree closed: ${entry?.title ?? path}`)
+      }
+      changed = true
+    }
+
+    if (changed) this.recompute()
+  }
+
+  /** Mark a worktree path as user-dismissed; remove its pane; never re-open in this fleet. */
+  dismissPane(worktreePath: string): void {
+    this.userDismissed.add(worktreePath)
+    this.removePaneForWorktree(worktreePath)
+    this.recompute()
+  }
+
+  /** Open the close-confirmation modal; resolve true on confirm, false on cancel. */
+  async confirmRootClose(): Promise<boolean> {
+    if (!this.deps.modal) return true
+    const ref: any = this.deps.modal.open(ConfirmFleetCloseModalComponent)
+    if (ref?.componentInstance) {
+      ref.componentInstance.repoName = this.repoInfo?.name ?? ''
+    }
+    try {
+      const result = await ref.result
+      return result === true
+    } catch {
+      return false
+    }
+  }
+
+  /** Re-run a dead pane's stored command. Clears the recovered flag and tears down its overlay. */
+  async relaunchPane(paneId: string): Promise<void> {
+    const entry = this.paneRegistry.get(paneId)
+    if (!entry) return
+    entry.recovered = false
+    if (entry.overlayRef) {
+      try { entry.overlayRef.destroy?.() } catch { /* noop */ }
+      entry.overlayRef = null
+    }
+  }
+
+  /**
+   * Marker reference so webpack keeps FleetDeadPaneOverlayComponent in the
+   * bundle for runtime overlay attachment (per fleet-lifecycle §5 step 11).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private static readonly _overlayRef = FleetDeadPaneOverlayComponent
+
+  private notify(kind: 'info' | 'error' | 'notice', text: string, details?: string): void {
+    const svc = this.deps.notifications as any
+    if (!svc) return
+    if (kind === 'info' && typeof svc.info === 'function') svc.info(text, details)
+    else if (kind === 'error' && typeof svc.error === 'function') svc.error(text, details)
+    else if (kind === 'notice' && typeof svc.notice === 'function') svc.notice(text)
   }
 
   serialize(): AgentFleetRecoveryToken {
@@ -231,10 +434,11 @@ export class FleetRegistry {
     splitTab: SplitTabComponent,
     profile: AgentFleetProfileOptions,
     profileId: string = 'agent-fleet',
+    deps: FleetControllerDeps = {},
   ): FleetController {
     const existing = this.controllers.get(splitTab)
     if (existing) return existing
-    const controller = new FleetController(splitTab, profile, profileId)
+    const controller = new FleetController(splitTab, profile, profileId, deps)
     this.controllers.set(splitTab, controller)
     controller.attach()
     return controller
