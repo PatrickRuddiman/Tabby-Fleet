@@ -49,6 +49,49 @@ export interface AgentFleetProfileOptions {
   encoding: EncodingMode
 }
 
+/**
+ * Per-pane metadata attached at construction time. Lives on Tabby's pane/tab
+ * `extras` field where possible (see slices/tabby-host §3 decision 2).
+ */
+export interface FleetPaneMetadata {
+  fleetTabId: string
+  fleetProfileId: string
+  role: 'root' | 'worktree'
+  worktreePath: string
+  branch: string | null
+  fleetVersion: number
+  spawnedAt: string
+  baselineWeight: number
+}
+
+/**
+ * One entry per pane in the recovery token. Carries enough information to
+ * rebuild the pane with a dead-pane overlay after Tabby restart.
+ */
+export interface RecoveredPane {
+  role: 'root' | 'worktree'
+  worktreePath: string
+  branch: string | null
+  command: string
+  title: string
+  color: string | null
+}
+
+/**
+ * Recovery token shape written by FleetController.getRecoveryToken and
+ * consumed by AgentFleetRecoveryProvider.recover.
+ */
+export interface AgentFleetRecoveryToken {
+  type: 'agent-fleet'
+  profileId: string
+  profile: AgentFleetProfileOptions
+  panes: RecoveredPane[]
+  tabTitle: string
+  tabColor: string | null
+}
+
+export const FLEET_VERSION = 1
+
 export const DEFAULT_PROFILE_OPTIONS: AgentFleetProfileOptions = {
   repoPath: '',
   worktreePathPrefix: '.claude/worktrees/',
