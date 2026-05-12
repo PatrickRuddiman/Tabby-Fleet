@@ -133,10 +133,9 @@ describe('fleet.registry', () => {
       assert.equal(list.contains('fleet-tab'), false)
     })
 
-    it('applyRatios delegates to rebuildGrid and calls splitTab.layout()', () => {
+    it('rebuildGrid with an empty registry is a no-op', () => {
       const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1')
-      // Empty registry → rebuildGrid is a no-op; applyRatios shim shouldn't crash.
-      controller.applyRatios([])
+      controller.rebuildGrid()
       assert.equal((splitTab as any)._layoutCalls, 0)
     })
 

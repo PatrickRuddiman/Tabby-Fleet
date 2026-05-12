@@ -8,44 +8,62 @@ You point a profile at a repo. The plugin spawns a root pane at the repo root ru
 
 ## Install
 
-The plugin isn't on Tabby's plugin marketplace yet. Install from source.
+Three options, easiest first.
+
+### Option 1: Tabby's Plugin Manager (recommended)
+
+1. Open Tabby → **Settings → Plugins → Available**.
+2. Search **tabby-fleet**.
+3. Click **Get**.
+
+Tabby's plugin manager shells out to npm under the hood and drops the package into your user plugins folder.
+
+### Option 2: npm CLI
 
 ```powershell
-# Clone and build
+# Windows (Scoop install of Tabby):
+npm install --prefix "$env:USERPROFILE\scoop\persist\tabby\data\plugins" @pruddiman/tabby-fleet
+
+# Windows (default install):
+npm install --prefix "$env:APPDATA\tabby\plugins" @pruddiman/tabby-fleet
+
+# macOS / Linux:
+npm install --prefix "$HOME/.config/tabby/plugins" @pruddiman/tabby-fleet
+```
+
+Restart Tabby. You'll see an **Agent Fleet** template under "New profile".
+
+### Option 3: From source (development)
+
+```bash
 git clone https://github.com/PatrickRuddiman/Tabby-Fleet.git
 cd Tabby-Fleet
 npm install
 npm run build
 ```
 
-Then link the built directory into Tabby's plugin folder. Tabby looks for plugins under `node_modules/tabby-*` inside its data dir.
-
-**Windows (Scoop install of Tabby):**
+Link the clone into Tabby's plugin folder so every `npm run build` is live:
 
 ```powershell
-# Replace <CLONE> with the absolute path to your tabby-fleet clone.
+# Windows (Scoop install of Tabby): replace <CLONE> with your absolute clone path.
 $plugins = "$env:USERPROFILE\scoop\persist\tabby\data\plugins\node_modules"
 New-Item -ItemType Directory -Force -Path $plugins | Out-Null
-New-Item -ItemType Junction -Path "$plugins\tabby-fleet" -Target "<CLONE>"
-```
+New-Item -ItemType Junction -Path "$plugins\@pruddiman\tabby-fleet" -Target "<CLONE>"
 
-**Windows (default install):**
-
-```powershell
+# Windows (default install):
 $plugins = "$env:APPDATA\tabby\plugins\node_modules"
 New-Item -ItemType Directory -Force -Path $plugins | Out-Null
-New-Item -ItemType Junction -Path "$plugins\tabby-fleet" -Target "<CLONE>"
+New-Item -ItemType Junction -Path "$plugins\@pruddiman\tabby-fleet" -Target "<CLONE>"
 ```
 
-**macOS / Linux:**
-
 ```bash
-PLUGINS="$HOME/.config/tabby/plugins/node_modules"
+# macOS / Linux:
+PLUGINS="$HOME/.config/tabby/plugins/node_modules/@pruddiman"
 mkdir -p "$PLUGINS"
 ln -s "$(pwd)" "$PLUGINS/tabby-fleet"
 ```
 
-Restart Tabby. If the plugin loaded you'll see an **Agent Fleet** template under "New profile".
+Restart Tabby.
 
 ## Run
 
