@@ -1,5 +1,5 @@
 {
-  "name": "@pruddiman/tabby-fleet",
+  "name": "tabby-fleet",
   "version": "0.1.0",
   "description": "Tabby Terminal plugin: one tab per git repo, one agent pane per worktree, focus-zoom grid layout.",
   "keywords": [
@@ -27,9 +27,6 @@
   "homepage": "https://github.com/PatrickRuddiman/Tabby-Fleet#readme",
   "bugs": "https://github.com/PatrickRuddiman/Tabby-Fleet/issues",
   "author": "Patrick Ruddiman",
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "webpack --progress --color",
     "watch": "webpack --progress --color --watch",

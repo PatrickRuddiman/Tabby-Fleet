@@ -10,8 +10,8 @@ name: release
 # One-time setup before this workflow can publish (per npm's trusted-publisher
 # flow — first publish cannot use OIDC, see npm/cli#8544):
 #   1. Publish v0.1.0 once locally with `npm login` + `npm publish` so the
-#      package exists on the registry.
-#   2. On npmjs.com → package page → Settings → Trusted Publisher → Add:
+#      package `tabby-fleet` exists on the registry.
+#   2. On npmjs.com → tabby-fleet → Settings → Trusted Publisher → Add:
 #        Publisher: GitHub Actions
 #        Organization/user: PatrickRuddiman
 #        Repository: Tabby-Fleet

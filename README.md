@@ -22,13 +22,13 @@ Tabby's plugin manager shells out to npm under the hood and drops the package in
 
 ```powershell
 # Windows (Scoop install of Tabby):
-npm install --prefix "$env:USERPROFILE\scoop\persist\tabby\data\plugins" @pruddiman/tabby-fleet
+npm install --prefix "$env:USERPROFILE\scoop\persist\tabby\data\plugins" tabby-fleet
 
 # Windows (default install):
-npm install --prefix "$env:APPDATA\tabby\plugins" @pruddiman/tabby-fleet
+npm install --prefix "$env:APPDATA\tabby\plugins" tabby-fleet
 
 # macOS / Linux:
-npm install --prefix "$HOME/.config/tabby/plugins" @pruddiman/tabby-fleet
+npm install --prefix "$HOME/.config/tabby/plugins" tabby-fleet
 ```
 
 Restart Tabby. You'll see an **Agent Fleet** template under "New profile".
@@ -48,17 +48,17 @@ Link the clone into Tabby's plugin folder so every `npm run build` is live:
 # Windows (Scoop install of Tabby): replace <CLONE> with your absolute clone path.
 $plugins = "$env:USERPROFILE\scoop\persist\tabby\data\plugins\node_modules"
 New-Item -ItemType Directory -Force -Path $plugins | Out-Null
-New-Item -ItemType Junction -Path "$plugins\@pruddiman\tabby-fleet" -Target "<CLONE>"
+New-Item -ItemType Junction -Path "$plugins\tabby-fleet" -Target "<CLONE>"
 
 # Windows (default install):
 $plugins = "$env:APPDATA\tabby\plugins\node_modules"
 New-Item -ItemType Directory -Force -Path $plugins | Out-Null
-New-Item -ItemType Junction -Path "$plugins\@pruddiman\tabby-fleet" -Target "<CLONE>"
+New-Item -ItemType Junction -Path "$plugins\tabby-fleet" -Target "<CLONE>"
 ```
 
 ```bash
 # macOS / Linux:
-PLUGINS="$HOME/.config/tabby/plugins/node_modules/@pruddiman"
+PLUGINS="$HOME/.config/tabby/plugins/node_modules"
 mkdir -p "$PLUGINS"
 ln -s "$(pwd)" "$PLUGINS/tabby-fleet"
 ```
