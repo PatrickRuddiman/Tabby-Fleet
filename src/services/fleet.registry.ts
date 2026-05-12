@@ -290,16 +290,31 @@ export class FleetController {
       }
     }
 
-    // Wrap session.destroy so that whenever Tabby tears down this pane (× button,
-    // shell exit, fleet close), we first tree-kill the agent and its descendants.
-    // Without this the shell dies via TerminateProcess but its child processes
-    // (claude.exe, sub-agents, watchers) become orphans that keep file handles on
-    // the worktree dir — blocking `git worktree remove` on Windows.
+    // Override canClose so Tabby's "X is still running. Kill?" prompt never
+    // fires for our panes. Tabby's LocalTerminalTabComponent.canClose checks
+    // session.getChildProcesses() and prompts the user when an agent is
+    // alive — but our model is "the agent IS the pane", so the answer is
+    // always "kill the agent and proceed". We tree-kill first (so the agent
+    // and its descendants release their handles before Tabby tears down the
+    // shell PTY), then return true. Works for individual pane close, fleet
+    // tab close, and full Tabby window close (which propagates canClose
+    // through every pane).
+    const tabAny: any = tab
+    if (typeof tabAny.canClose === 'function' && !tabAny.__fleetCanCloseWrapped) {
+      tabAny.canClose = async () => {
+        await this.killPaneChildren(tab)
+        return true
+      }
+      tabAny.__fleetCanCloseWrapped = true
+    }
+
+    // Also wrap session.destroy as a belt-and-suspenders measure for any code
+    // path that reaches teardown without going through canClose (shell exit,
+    // PTY-side errors). Fire-and-forget so Tabby's teardown isn't blocked.
     const session: any = (tab as any).session
     if (session && typeof session.destroy === 'function' && !session.__fleetKillWrapped) {
       const origDestroy = session.destroy.bind(session)
       session.destroy = (...args: any[]) => {
-        // Fire-and-forget — don't block Tabby's teardown.
         void this.killPaneChildren(tab)
         return origDestroy(...args)
       }
