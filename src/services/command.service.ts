@@ -54,10 +54,11 @@ export function renderTitle(template: string, vars: Record<string, string>): str
 
 /**
  * Override a Tabby Local profile's shell argv so the shell auto-executes
- * `agentCommand` on startup and stays interactive afterwards. Shell is
- * detected by the basename of `shellCommand` (the local profile's
- * `options.command`). Returns the original argv unchanged when `agentCommand`
- * is empty or the shell is unrecognised.
+ * `agentCommand` and exits when the agent exits — so closing the pane / the
+ * Tabby window doesn't trip Tabby's "X is still running" prompt for an
+ * orphaned shell. Shell is detected by the basename of `shellCommand`
+ * (the local profile's `options.command`). Returns the original argv
+ * unchanged when `agentCommand` is empty or the shell is unrecognised.
  */
 export function wrapForShell(
   shellCommand: string,
@@ -69,23 +70,25 @@ export function wrapForShell(
   }
   const base = (shellCommand || '').toLowerCase().replace(/\\/g, '/').split('/').pop() ?? ''
   if (/^(pwsh|powershell)(\.exe)?$/.test(base)) {
-    return { command: shellCommand, args: ['-NoExit', '-Command', agentCommand] }
+    // No -NoExit: when the agent exits, pwsh exits, the pane closes cleanly.
+    return { command: shellCommand, args: ['-NoLogo', '-Command', agentCommand] }
   }
   if (/^cmd(\.exe)?$/.test(base)) {
-    return { command: shellCommand, args: ['/K', agentCommand] }
+    // /C exits after the command; /K would keep the shell open.
+    return { command: shellCommand, args: ['/C', agentCommand] }
   }
   if (/^wsl(\.exe)?$/.test(base)) {
     return {
       command: shellCommand,
-      args: [...shellArgs, '--', 'bash', '-i', '-c', `${agentCommand}; exec bash`],
+      args: [...shellArgs, '--', 'bash', '-i', '-c', agentCommand],
     }
   }
   if (/^fish(\.exe)?$/.test(base)) {
     return { command: shellCommand, args: ['-i', '-C', agentCommand] }
   }
   if (/^(bash|zsh|sh|dash|ash)(\.exe)?$/.test(base)) {
-    const shellName = base.replace(/\.exe$/, '')
-    return { command: shellCommand, args: ['-i', '-c', `${agentCommand}; exec ${shellName}`] }
+    // No trailing `exec $SHELL`: when the agent exits, the shell exits.
+    return { command: shellCommand, args: ['-i', '-c', agentCommand] }
   }
   // Unknown shell — leave argv alone; user can override via the Advanced section.
   return { command: shellCommand, args: shellArgs }
