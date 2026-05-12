@@ -20,7 +20,11 @@ describe('AgentFleetModule (smoke)', () => {
     assert.ok(classes.includes(AgentFleetRecoveryProvider))
   })
 
-  it('imports list is currently empty (incremental rollout)', () => {
-    assert.equal(AGENT_FLEET_MODULE_CONFIG.imports.length, 0)
+  it('imports CommonModule, FormsModule, NgbModule, TabbyCoreModule', () => {
+    assert.equal(AGENT_FLEET_MODULE_CONFIG.imports.length, 4)
+  })
+
+  it('declares the four fleet components', () => {
+    assert.equal(AGENT_FLEET_MODULE_CONFIG.declarations.length, 4)
   })
 })

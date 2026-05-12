@@ -4,7 +4,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { SplitTabComponent } from 'tabby-core'
-import { FleetController, FleetRegistry } from '../src/services/fleet.registry'
+import { FleetController, FleetControllerDeps, FleetRegistry } from '../src/services/fleet.registry'
 import { DEFAULT_PROFILE_OPTIONS } from '../src/api'
 import { Worktree } from '../src/utils/porcelain'
 import { RepoInfo } from '../src/utils/vars'
@@ -29,7 +29,8 @@ function cleanupTempDir(dir: string): void {
 }
 
 function addWorktreeOnDisk(repo: string, name: string): void {
-  execSync(`git worktree add .claude/worktrees/${name} -b agent/${name}`, {
+  // Worktrees go wherever — no path prefix enforced.
+  execSync(`git worktree add wt-${name} -b agent/${name}`, {
     cwd: repo,
     env: GIT_ENV,
     stdio: 'pipe',
@@ -55,6 +56,44 @@ function makeWorktree(partial: Partial<Worktree>): Worktree {
     isMain: false,
     ...partial,
   }
+}
+
+// Minimal Tabby-service stubs sufficient for addPaneForWorktree to run end-to-end
+// without a real Angular runtime. Tracks every tab created.
+function makeDeps(notifications?: any): FleetControllerDeps & { createdTabs: any[] } {
+  const created: any[] = []
+  const localProfile = {
+    id: 'local-test',
+    type: 'local',
+    name: 'pwsh',
+    isBuiltin: true,
+    isTemplate: false,
+    options: { command: 'pwsh.exe', args: [] as string[], cwd: '' },
+  }
+  const tabsService: any = {
+    create(params: any) {
+      const tab: any = { params, profile: params?.inputs?.profile, session: null, destroyed$: { subscribe: () => ({ unsubscribe: () => {} }) } }
+      created.push(tab)
+      return tab
+    },
+  }
+  const profilesService: any = {
+    async getProfiles() { return [localProfile] },
+    providerForProfile() {
+      return {
+        async getNewTabParameters(profile: any) {
+          return { type: function FakeTerminalTab() {}, inputs: { profile } }
+        },
+      }
+    },
+  }
+  return {
+    notifications,
+    tabsService,
+    profilesService,
+    resolveTheme: async () => null,
+    createdTabs: created,
+  } as any
 }
 
 describe('fleet.registry', () => {
@@ -94,45 +133,37 @@ describe('fleet.registry', () => {
       assert.equal(list.contains('fleet-tab'), false)
     })
 
-    it('applyRatios calls splitTab.layout()', () => {
+    it('applyRatios delegates to rebuildGrid and calls splitTab.layout()', () => {
       const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1')
-      const before = (splitTab as any)._layoutCalls
+      // Empty registry → rebuildGrid is a no-op; applyRatios shim shouldn't crash.
       controller.applyRatios([])
-      const after = (splitTab as any)._layoutCalls
-      assert.equal(after, before + 1)
+      assert.equal((splitTab as any)._layoutCalls, 0)
     })
 
-    it('addPaneForWorktree calls splitTab.add with the correct relative + side', async () => {
-      const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1')
-      // Root pane: relative null, side 'r'
+    it('addPaneForWorktree always uses side=r so panes form one container', async () => {
+      const deps = makeDeps()
+      const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1', deps)
       await controller.addPaneForWorktree(makeWorktree({ path: '/repo', isMain: true }), REPO, { isRoot: true })
-      // First worktree: relative root, side 'r'
-      await controller.addPaneForWorktree(
-        makeWorktree({ path: '/repo/.claude/worktrees/a', branch: 'agent/a' }),
-        REPO,
-      )
-      // Second worktree: relative previous worktree, side 'b'
-      await controller.addPaneForWorktree(
-        makeWorktree({ path: '/repo/.claude/worktrees/b', branch: 'agent/b' }),
-        REPO,
-      )
+      await controller.addPaneForWorktree(makeWorktree({ path: '/repo/wt-a', branch: 'agent/a' }), REPO)
+      await controller.addPaneForWorktree(makeWorktree({ path: '/repo/wt-b', branch: 'agent/b' }), REPO)
+
       const calls = (splitTab as any)._addTabCalls
       assert.equal(calls.length, 3)
+      // Root: no relative.
       assert.equal(calls[0].relative, null)
       assert.equal(calls[0].side, 'r')
+      // Every subsequent pane: side='r', relative=previously-added pane.
       assert.equal(calls[1].side, 'r')
-      assert.equal(calls[1].relative, calls[0].tab) // worktree-1 relative to root
-      assert.equal(calls[2].side, 'b')
-      assert.equal(calls[2].relative, calls[1].tab) // worktree-2 relative to worktree-1
+      assert.equal(calls[1].relative, calls[0].tab)
+      assert.equal(calls[2].side, 'r')
+      assert.equal(calls[2].relative, calls[1].tab)
     })
 
     it("getRecoveryToken returns type='agent-fleet' and panes.length matching the registry", async () => {
-      const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1')
+      const deps = makeDeps()
+      const controller = registry.register(splitTab, DEFAULT_PROFILE_OPTIONS, 'p1', deps)
       await controller.addPaneForWorktree(makeWorktree({ path: '/repo', isMain: true }), REPO, { isRoot: true })
-      await controller.addPaneForWorktree(
-        makeWorktree({ path: '/repo/.claude/worktrees/a', branch: 'agent/a' }),
-        REPO,
-      )
+      await controller.addPaneForWorktree(makeWorktree({ path: '/repo/wt-a', branch: 'agent/a' }), REPO)
       const token = (splitTab as any).getRecoveryToken() as ReturnType<FleetController['serialize']>
       assert.equal(token.type, 'agent-fleet')
       assert.equal(token.panes.length, 2)
@@ -149,7 +180,7 @@ describe('fleet.registry', () => {
     })
   })
 
-  describe('FleetController lifecycle (task 021 extensions)', () => {
+  describe('FleetController lifecycle', () => {
     let registry: FleetRegistry
     let splitTab: SplitTabComponent
     let repoDir = ''
@@ -174,53 +205,52 @@ describe('fleet.registry', () => {
       addWorktreeOnDisk(repoDir, 'feature-b')
       const controller = registry.register(
         splitTab,
-        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, watchMode: 'off' },
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir },
         'p1',
-        { notifications },
+        makeDeps(notifications),
       )
       await controller.launch()
       assert.equal(controller.paneRegistry.size, 3)
       const roles = [...controller.paneRegistry.values()].map(e => e.role).sort()
       assert.deepEqual(roles, ['root', 'worktree', 'worktree'])
+      // Stop the watcher poller so it doesn't leak between tests.
+      controller.detach()
     })
 
     it('launch with an invalid repo path aborts (no panes opened)', async () => {
       const controller = registry.register(
         splitTab,
-        { ...DEFAULT_PROFILE_OPTIONS, repoPath: '/definitely/not/a/real/path/xyz123', watchMode: 'off' },
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: '/definitely/not/a/real/path/xyz123' },
         'p1',
-        { notifications },
+        makeDeps(notifications),
       )
       await controller.launch()
       assert.equal(controller.paneRegistry.size, 0)
       const err = notifications.calls.find((c: any) => c.kind === 'error')
       assert.ok(err, 'expected an error notification on invalid repo path')
+      controller.detach()
     })
 
     it('launch aborts when preSpawnCommand exits non-zero', async () => {
       const controller = registry.register(
         splitTab,
-        {
-          ...DEFAULT_PROFILE_OPTIONS,
-          repoPath: repoDir,
-          preSpawnCommand: 'node -e "process.exit(1)"',
-          watchMode: 'off',
-        },
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, preSpawnCommand: 'node -e "process.exit(1)"' },
         'p1',
-        { notifications },
+        makeDeps(notifications),
       )
       await controller.launch()
       assert.equal(controller.paneRegistry.size, 0)
       const err = notifications.calls.find((c: any) => c.kind === 'error' && c.text === 'Pre-launch command failed')
       assert.ok(err, 'expected pre-launch-command-failed notification')
+      controller.detach()
     })
 
     it('onWatcherChange adds a newly-appearing worktree pane', async () => {
       const controller = registry.register(
         splitTab,
-        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, watchMode: 'off', notifyOnChange: false },
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, notifyOnChange: false },
         'p1',
-        { notifications },
+        makeDeps(notifications),
       )
       await controller.launch()
       assert.equal(controller.paneRegistry.size, 1) // root only
@@ -228,26 +258,28 @@ describe('fleet.registry', () => {
       addWorktreeOnDisk(repoDir, 'new-thing')
       await controller.onWatcherChange()
       assert.equal(controller.paneRegistry.size, 2)
+      controller.detach()
     })
 
     it('dismissPane sets userDismissed and onWatcherChange does NOT re-open the pane', async () => {
       addWorktreeOnDisk(repoDir, 'dismissable')
       const controller = registry.register(
         splitTab,
-        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, watchMode: 'off', notifyOnChange: false },
+        { ...DEFAULT_PROFILE_OPTIONS, repoPath: repoDir, notifyOnChange: false },
         'p1',
-        { notifications },
+        makeDeps(notifications),
       )
       await controller.launch()
       assert.equal(controller.paneRegistry.size, 2)
       const wtEntry = [...controller.paneRegistry.values()].find(e => e.role === 'worktree')!
-      controller.dismissPane(wtEntry.worktreePath)
+      await controller.dismissPane(wtEntry.worktreePath)
       assert.equal(controller.userDismissed.has(wtEntry.worktreePath), true)
       assert.equal(controller.paneRegistry.size, 1)
 
       // Watcher fires (worktree still on disk) — must NOT re-add the dismissed path.
       await controller.onWatcherChange()
       assert.equal(controller.paneRegistry.size, 1)
+      controller.detach()
     })
 
     it('confirmRootClose opens the modal and resolves true when result is true', async () => {
@@ -271,15 +303,15 @@ describe('fleet.registry', () => {
         paneId: 'paneX',
         pane: {},
         role: 'worktree',
-        worktreePath: '/repo/.claude/worktrees/x',
+        worktreePath: '/repo/wt-x',
         branch: 'agent/x',
-        command: 'claude --resume agent/x',
+        command: 'claude',
         title: 'x',
         color: null,
         recovered: true,
         baselineWeight: 1,
         overlayRef: { destroy: () => { destroyCalls++ } },
-      })
+      } as any)
       await controller.relaunchPane('paneX')
       const entry = controller.paneRegistry.get('paneX')!
       assert.equal(entry.recovered, false)

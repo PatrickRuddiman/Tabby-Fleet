@@ -59,7 +59,6 @@ const CRLF = STANDARD.replace(/\n/g, '\r\n')
 
 const DEFAULT_FILTER = {
   repoPath: '/repo',
-  worktreePathPrefix: '.claude/worktrees/',
   includeDetached: false,
   includePrunable: false,
   includeLocked: true,
@@ -124,13 +123,15 @@ describe('filterAndSortWorktrees', () => {
     assert.equal(result[0].isMain, true)
   })
 
-  it('excludes non-main worktrees whose path does not start with the prefix', () => {
+  it('keeps all non-main worktrees regardless of on-disk location', () => {
+    // worktreePathPrefix filtering was dropped — `git worktree list` is the
+    // source of truth, so worktrees can live anywhere.
     const stdout = [
       'worktree /repo',
       'HEAD aa',
       'branch refs/heads/main',
       '',
-      'worktree /repo/other/outside',
+      'worktree /some/totally/different/place',
       'HEAD bb',
       'branch refs/heads/agent/outside',
       '',
@@ -141,8 +142,7 @@ describe('filterAndSortWorktrees', () => {
     ].join('\n')
     const all = parseWorktreeListPorcelain(stdout)
     const result = filterAndSortWorktrees(all, DEFAULT_FILTER)
-    assert.equal(result.length, 2)
-    assert.equal(result[1].path, '/repo/.claude/worktrees/inside')
+    assert.equal(result.length, 3)
   })
 
   it('excludes detached worktrees when includeDetached is false', () => {

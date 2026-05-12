@@ -105,34 +105,23 @@ describe('worktree.service', () => {
       cleanupTempDir(repoDir)
     })
 
-    it('filters by worktreePathPrefix (only sub-prefix worktrees retained beyond main)', async () => {
-      // Create one worktree under .claude/worktrees/ and one outside the prefix.
-      execSync('git worktree add .claude/worktrees/inside-a -b agent/inside-a', {
-        cwd: repoDir,
-        env: GIT_ENV,
-        stdio: 'pipe',
-      })
-      execSync('git worktree add other/outside -b agent/outside', {
-        cwd: repoDir,
-        env: GIT_ENV,
-        stdio: 'pipe',
-      })
+    it('returns every worktree git knows about (no path-prefix filtering)', async () => {
+      // worktreePathPrefix was dropped — worktrees can live anywhere on disk.
+      execSync('git worktree add wt-a -b agent/a', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' })
+      execSync('git worktree add wt-b -b agent/b', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' })
 
       const result = await listFilteredWorktrees(repoDir, {
         repoPath: repoDir,
-        worktreePathPrefix: '.claude/worktrees/',
         includeDetached: false,
         includePrunable: false,
         includeLocked: true,
       })
       assert.equal(result.ok, true)
       if (result.ok) {
-        // Main + 1 inside-prefix worktree = 2; the outside-prefix is filtered out.
-        assert.equal(result.value.worktrees.length, 2)
+        assert.equal(result.value.worktrees.length, 3) // main + a + b
         assert.equal(result.value.worktrees[0].isMain, true)
-        const inside = result.value.worktrees[1]
-        assert.match(inside.path, /\.claude\/worktrees\/inside-a$/)
-        assert.equal(inside.branch, 'agent/inside-a')
+        const branches = result.value.worktrees.slice(1).map(w => w.branch).sort()
+        assert.deepEqual(branches, ['agent/a', 'agent/b'])
       }
     })
   })

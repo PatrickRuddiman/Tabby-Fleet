@@ -3,7 +3,9 @@ import { AgentFleetProfileSettingsComponent } from '../src/components/settings.c
 import { DEFAULT_PROFILE_OPTIONS } from '../src/api'
 
 function makeComponent(): AgentFleetProfileSettingsComponent {
-  const c = new AgentFleetProfileSettingsComponent()
+  // Real DI is provided in the running plugin; the tests use null stubs since
+  // they exercise the clamp / theme-list / shell-list pure logic only.
+  const c = new (AgentFleetProfileSettingsComponent as any)(null, null, [])
   c.profile = { options: { ...DEFAULT_PROFILE_OPTIONS } } as any
   return c
 }
@@ -27,24 +29,28 @@ describe('settings.component', () => {
       c.profile.options.zoomFactor = 99 // above max (4.0)
       c.clampField('zoomFactor')
       assert.equal(c.profile.options.zoomFactor, 4.0)
-      c.profile.options.pollIntervalMs = 999_999_999
-      c.clampField('pollIntervalMs')
-      assert.equal(c.profile.options.pollIntervalMs, 60_000)
     })
 
-    it('shellArgsFromText splits on newlines and drops empty lines', () => {
+    it('clampField clamps minPaneWidth/Height within the documented range', () => {
       const c = makeComponent()
-      const text = '-NoExit\r\n-EncodedCommand\n\n  \n'
-      const args = c.shellArgsFromText(text)
-      assert.deepEqual(args, ['-NoExit', '-EncodedCommand'])
+      c.profile.options.minPaneWidth = 5 // below 40
+      c.clampField('minPaneWidth')
+      assert.equal(c.profile.options.minPaneWidth, 40)
+      c.profile.options.minPaneHeight = 99_999 // above 4000
+      c.clampField('minPaneHeight')
+      assert.equal(c.profile.options.minPaneHeight, 4000)
     })
 
-    it('shellArgs round-trip (array → text → array) is identity', () => {
+    it('clampField is a no-op for fields with no bounds entry', () => {
       const c = makeComponent()
-      const original = ['-NoExit', '-EncodedCommand']
-      const text = c.shellArgsToText(original)
-      const roundTripped = c.shellArgsFromText(text)
-      assert.deepEqual(roundTripped, original)
+      c.profile.options.zoomTransitionMs = 250
+      c.clampField('zoomTransitionMs')
+      assert.equal(c.profile.options.zoomTransitionMs, 250)
+    })
+
+    it('starts with showAdvanced collapsed', () => {
+      const c = makeComponent()
+      assert.equal((c as any).showAdvanced, false)
     })
   })
 })

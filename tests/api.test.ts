@@ -10,20 +10,34 @@ import {
 
 describe('api', () => {
   describe('DEFAULT_PROFILE_OPTIONS', () => {
-    it('has exactly 27 keys', () => {
-      assert.equal(Object.keys(DEFAULT_PROFILE_OPTIONS).length, 27)
+    it('has exactly 21 keys', () => {
+      assert.equal(Object.keys(DEFAULT_PROFILE_OPTIONS).length, 21)
     })
 
-    it("layoutMode default is 'grid'", () => {
-      assert.equal(DEFAULT_PROFILE_OPTIONS.layoutMode, 'grid')
+    it('agentCommand default is empty (user supplies their agent)', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.agentCommand, '')
     })
 
-    it("shellArgs default is ['-NoExit', '-EncodedCommand']", () => {
-      assert.deepEqual(DEFAULT_PROFILE_OPTIONS.shellArgs, ['-NoExit', '-EncodedCommand'])
+    it("rootCommandTemplate default is 'claude' (orchestrator)", () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.rootCommandTemplate, 'claude')
+    })
+
+    it('shellProfileId default is null (use Tabby default shell)', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.shellProfileId, null)
+    })
+
+    it('rootTheme and worktreeTheme default to null (use Tabby default)', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.rootTheme, null)
+      assert.equal(DEFAULT_PROFILE_OPTIONS.worktreeTheme, null)
+    })
+
+    it('zoom defaults: factor 2.0, min pane 120x80', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.zoomFactor, 2.0)
+      assert.equal(DEFAULT_PROFILE_OPTIONS.minPaneWidth, 120)
+      assert.equal(DEFAULT_PROFILE_OPTIONS.minPaneHeight, 80)
     })
 
     it('is assignable to AgentFleetProfileOptions and Partial<AgentFleetProfileOptions>', () => {
-      // Pure type-check assertion: if these assignments compile, the test passes.
       const full: AgentFleetProfileOptions = DEFAULT_PROFILE_OPTIONS
       const partial: Partial<AgentFleetProfileOptions> = DEFAULT_PROFILE_OPTIONS
       assert.equal(typeof full.repoPath, 'string')
@@ -53,9 +67,9 @@ describe('api', () => {
     it('AgentFleetRecoveryToken.type narrows to literal "agent-fleet"', () => {
       const pane: RecoveredPane = {
         role: 'worktree',
-        worktreePath: '/repo/.claude/worktrees/x',
-        branch: 'agent/x',
-        command: 'claude --resume agent/x',
+        worktreePath: '/repo/wt-x',
+        branch: 'feat-x',
+        command: 'claude',
         title: 'x',
         color: null,
       }

@@ -1,122 +1,117 @@
 # tabby-fleet
 
-A [Tabby Terminal](https://github.com/Eugeny/tabby) plugin that opens one tab per git repository with the orchestrator agent running in a root pane and one auto-arranged split pane per active git worktree under a configurable path. A filesystem watcher keeps the splits in sync as worktrees come and go. Focusing a pane enlarges it; the others shrink but stay visible.
+A [Tabby Terminal](https://tabby.sh) plugin that turns one git repo into one tab with a grid of agent panes — one per worktree.
+
+You point a profile at a repo. The plugin spawns a root pane at the repo root running your orchestrator agent, plus one pane per worktree (anywhere on disk — `git worktree list` is the source of truth) running the agent of your choice, each `cd`'d into its own worktree directory. New worktrees appear as new panes within a second. Closed panes stay closed. Focus zooms.
+
+![status](https://img.shields.io/badge/status-beta-yellow)
 
 ## Install
 
-```sh
-npm install tabby-fleet
-```
+The plugin isn't on Tabby's plugin marketplace yet. Install from source.
 
-For local development, build then symlink into Tabby's plugin directory:
-
-```sh
+```powershell
+# Clone and build
+git clone https://github.com/PatrickRuddiman/Tabby-Fleet.git
+cd Tabby-Fleet
+npm install
 npm run build
-# Windows
-mklink /D %APPDATA%\tabby\plugins\node_modules\tabby-fleet C:\path\to\tabby-fleet
-# macOS / Linux
-ln -s /absolute/path/to/tabby-fleet ~/.config/tabby/plugins/node_modules/tabby-fleet
 ```
 
-Restart Tabby. The **Agent Fleet** profile type appears in Settings → Profiles → New.
+Then link the built directory into Tabby's plugin folder. Tabby looks for plugins under `node_modules/tabby-*` inside its data dir.
 
-## Quickstart
+**Windows (Scoop install of Tabby):**
 
-1. Open Tabby's profile editor and create a new **Agent Fleet** profile.
-2. Set **Repo path** to your repository (leave empty to use the current working directory at launch).
-3. Defaults run `claude` at the repo root and `claude --resume {branch}` in each worktree under `.claude/worktrees/`.
-4. Launch the profile. A tab opens with a left-side orchestrator pane plus one stacked pane per existing worktree.
-5. Direct the orchestrator agent ("Create a worktree for X, refactor Y in another worktree"). New worktrees on disk become new panes within ~1 second; removed ones close their panes.
-
-## Settings reference
-
-| Setting | Default | Description |
-|---|---|---|
-| Repo path | `""` | Absolute repo path. Empty = use current working directory at launch. |
-| Worktree path prefix | `.claude/worktrees/` | Only worktrees under this prefix open as panes. |
-| Include detached | `false` | Open panes for detached-HEAD worktrees. |
-| Include prunable | `false` | Open panes for worktrees git has marked as prunable. |
-| Include locked | `true` | Open panes for locked worktrees. |
-| Root command template | `claude` | Command run in the root (orchestrator) pane. |
-| Root title template | `{repo} (orchestrator)` | Title shown on the root pane tab. |
-| Worktree command template | `claude --resume {branch}` | Command run in each worktree pane. |
-| Worktree title template | `{branch_short}` | Title shown on each worktree pane tab. |
-| Root pane color | (unset) | Optional hex color for the root pane tag. |
-| Worktree pane color | (unset) | Optional hex color for worktree pane tags. |
-| Layout mode | `grid` | `grid` (auto-zoom on focus) or `static-grid` (no zoom). |
-| Zoom factor | `2.0` | Focused pane grows to this multiple of baseline (1.0–4.0). |
-| Min pane width | `120` | Pixel floor for pane width. |
-| Min pane height | `80` | Pixel floor for pane height. |
-| Zoom transition (ms) | `150` | Animation duration for focus zoom (0–1000). |
-| Watch mode | `fs` | `fs` events, `poll` periodic, or `off` (no auto-sync). |
-| Poll interval (ms) | `5000` | Used by `poll` mode or filesystem fallback (500–60000). |
-| Auto-open new | `true` | Open a pane when a worktree appears on disk. |
-| Auto-close removed | `true` | Close the pane when a worktree disappears from disk. |
-| Steal focus on add | `false` | New panes steal focus instead of inheriting prior focus. |
-| Notify on change | `true` | Show a toast when a pane is auto-added/removed. |
-| Spawn mode | `eager` | `eager` (open all at launch) or `lazy` (open on demand). |
-| Pre-launch command | `""` | Shell command run once before any pane opens; non-zero exit aborts. |
-| Shell program | `pwsh.exe` | Executable hosting each pane's command (Windows default). |
-| Shell args | `["-NoExit", "-EncodedCommand"]` | One argument per line in the settings UI. |
-| Encoding mode | `encoded` | `encoded` (UTF-16LE base64) or `command` (`& { ... }` wrapper). |
-
-The same fields are also editable as global defaults under **Settings → Agent Fleet defaults**. New profiles inherit those defaults; existing profiles keep their own values.
-
-## Template variables
-
-Available in `commandTemplate`, `rootCommandTemplate`, `paneTitlePattern`, `rootTitle`:
-
-| Variable | Resolves to |
-|---|---|
-| `{path}` | Absolute worktree path (forward slashes) |
-| `{path_native}` | Absolute worktree path (native OS separators) |
-| `{branch}` | Full branch name (e.g. `agent/add-stripe-webhooks`) |
-| `{branch_short}` | Branch with the first slash-separated segment removed (e.g. `add-stripe-webhooks`) |
-| `{name}` | Final path component of the worktree |
-| `{head}` | Full HEAD commit hash |
-| `{head_short}` | First 7 characters of the HEAD hash |
-| `{repo}` | Repo name (final component of the repo root path) |
-| `{repo_path}` | Absolute path to the repo root |
-
-`{{` and `}}` escape to literal `{` and `}`. Unknown placeholders are left as-is so typos are visible at the shell prompt.
-
-Worked example with `commandTemplate = "claude --resume {branch}"` and a worktree at `C:/dev/wineapi/.claude/worktrees/add-stripe-webhooks` on branch `agent/add-stripe-webhooks`:
-
-```
-claude --resume agent/add-stripe-webhooks
+```powershell
+# Replace <CLONE> with the absolute path to your tabby-fleet clone.
+$plugins = "$env:USERPROFILE\scoop\persist\tabby\data\plugins\node_modules"
+New-Item -ItemType Directory -Force -Path $plugins | Out-Null
+New-Item -ItemType Junction -Path "$plugins\tabby-fleet" -Target "<CLONE>"
 ```
 
-## Layout modes
+**Windows (default install):**
 
-- **`grid` (default)** — root pane on the left at 50% width; worktree panes stacked vertically on the right, sharing the other 50% evenly. Focusing any pane enlarges it (default ~2× baseline within its container) while the others shrink but never below the configured minimum dimensions.
-- **`static-grid`** — same baseline layout, but focus does not resize panes. Useful when many worktrees are open and the zoom animation feels distracting.
+```powershell
+$plugins = "$env:APPDATA\tabby\plugins\node_modules"
+New-Item -ItemType Directory -Force -Path $plugins | Out-Null
+New-Item -ItemType Junction -Path "$plugins\tabby-fleet" -Target "<CLONE>"
+```
 
-## Filesystem watcher modes
+**macOS / Linux:**
 
-- **`fs` (default)** — uses `fs.watch` on `<repo>/.git/worktrees/`. Reflects worktree changes within ~1 second.
-- **`poll`** — periodic `git worktree list` every `pollIntervalMs` (default 5 s). Use this on network shares or filesystems where `fs.watch` is unreliable.
-- **`off`** — no auto-sync. New worktrees do not appear until you relaunch the profile.
+```bash
+PLUGINS="$HOME/.config/tabby/plugins/node_modules"
+mkdir -p "$PLUGINS"
+ln -s "$(pwd)" "$PLUGINS/tabby-fleet"
+```
 
-When `fs` mode fails to attach (network shares, certain Docker volumes), the plugin falls back to polling automatically and shows a one-time notification indicating which mode is active.
+Restart Tabby. If the plugin loaded you'll see an **Agent Fleet** template under "New profile".
 
-## Troubleshooting
+## Run
 
-- **"Not a git repository: ..."** — the profile's repo path doesn't resolve to a git repo. Open the profile editor and confirm the path.
-- **"command not found" in a pane** — the configured `commandTemplate` references a binary that isn't on `PATH`. The pane stays open at the shell prompt so you can investigate.
-- **Worktree appeared on disk but no pane opened** — the worktree may be outside `worktreePathPrefix`, detached, prunable, or locked. Adjust the filter settings.
-- **Watcher silently stopped working** — common on network shares. Set `watchMode` to `poll` in the profile. The plugin already falls back automatically and notifies on launch.
-- **Plugin doesn't appear in Tabby** — restart Tabby. Confirm `tabby-plugin` is in the package's `keywords` and that the package is symlinked into Tabby's plugin directory.
-- **macOS / Linux: panes don't open** — v0.1 ships Windows defaults (`pwsh.exe` + `-EncodedCommand`). Override `shell` and `shellArgs` per profile (e.g. `shell = "bash"`, `shellArgs = ["-c"]`, `encoding = "command"`). Cross-platform defaults are deferred to a later release.
+1. Tabby → **Settings → Profiles → New profile → Agent Fleet**.
+2. Configure the profile:
+   - **Config tab:**
+     - **Repo path** — root of the git repo (Browse… opens a folder picker).
+     - **Pre-launch command** — optional, runs once at launch (e.g. `pnpm install`).
+     - **Shell** — picks one of your installed Tabby Local profiles (pwsh, bash, wsl, …).
+     - **Agent command** — what to run in each worktree pane. E.g. `claude`, `copilot`, `codex`, `opencode`. Runs in the worktree directory.
+     - **Filters** — include/exclude detached / prunable / locked worktrees.
+     - **Notifications** — focus-on-add and worktree-change toasts.
+     - **Advanced** (collapsed) — separate orchestrator command for the root pane and title patterns.
+   - **Themes tab:**
+     - **Orchestrator** sub-tab — pick a color scheme for the root pane.
+     - **Worker** sub-tab — pick a color scheme for the worktree panes.
+3. Save the profile. Open it from the profile launcher.
 
-## Platform support
+## What to expect
 
-- **Windows**: fully supported with shipped defaults.
-- **macOS / Linux**: works with developer-supplied shell config (override `shell` and `shellArgs` per profile). Shipped defaults coming in a later release.
+**On open:**
 
-## Spec and design
+- One tab opens with N panes arranged in a square-ish grid (`cols = ceil(sqrt(N))`, `rows = ceil(N / cols)`).
+- The root pane runs your orchestrator command at the repo root. Every other pane is a worktree pane running the agent at its worktree path.
+- About 400 ms after the last pane is constructed, the plugin triggers a final layout pass so xterm + PTY + agent are all sized correctly before the agent's banner renders.
 
-See `spec.md` (behavior-only WHAT/WHY), `plan.md` (phased implementation roadmap with verified Tabby API findings), and `slices/` (per-vertical design docs).
+**Click a pane:**
+
+- That row gets the larger row weight; that pane gets the larger column weight within its row. The other panes shrink. Focus another pane and the ratios swap.
+
+**`git worktree add` from anywhere:**
+
+- The plugin polls `git worktree list` adaptively (500 ms while activity is recent, backing off to 10 s after one minute of quiet). A new worktree appears as a pane within ~500 ms. Layout rebalances to the new grid. Your typing focus is preserved — the new pane doesn't steal it.
+
+**`git worktree remove` from anywhere:**
+
+- Within ~500 ms the watcher sees the worktree disappear. The plugin tree-kills the agent process and all its descendants (`taskkill /F /T /PID` on Windows; `kill -group` + recursive `pgrep -P` on Unix), releases file handles, then removes the pane. The orchestrator can clean up any leftover directory.
+
+**Close a pane (× button or `exit` in the shell):**
+
+- The plugin tree-kills the agent before Tabby tears the shell down. Then it adds that worktree path to a session-local "dismissed" set so the watcher does NOT reopen the pane even if the worktree is still on disk — letting you safely `git worktree remove` after.
+
+**Close the root pane:**
+
+- Confirmation modal: closes the whole fleet tab.
+
+**Quit and reopen Tabby:**
+
+- The fleet tab is restored from Tabby's tab-recovery system with each pane in a dead state. Click a pane to relaunch its agent.
+
+## Compatibility
+
+- Tabby 1.0.230+ (Angular 15)
+- Windows, macOS, Linux
+- Tested daily on Windows 11 + Tabby 1.0.233 + pwsh 7 + Claude Code
+
+## Develop
+
+```bash
+npm install
+npm run watch   # rebuild on every change
+npm test        # run the test suite (mocha)
+```
+
+The dev junction (above) means every `npm run build` is immediately visible to Tabby on next launch — no reinstall needed.
 
 ## License
 
-MIT.
+MIT

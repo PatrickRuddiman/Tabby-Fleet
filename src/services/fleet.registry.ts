@@ -10,7 +10,6 @@ import {
   FLEET_VERSION,
   RecoveredPane,
 } from '../api'
-import { computeLayoutWeights, LayoutWeights, PaneInfo } from './layout.service'
 import { killProcessTree, wrapForShell } from './command.service'
 import {
   listFilteredWorktrees,
@@ -198,16 +197,6 @@ export class FleetController {
   }
 
   /**
-   * Backwards-compatible shim. Old code paths (recompute, watcher diff) call
-   * applyRatios; route them through rebuildGrid so a single mechanism owns
-   * the layout.
-   */
-  applyRatios(_weights: LayoutWeights[]): void {
-    const focused = (this.splitTab as any).getFocusedTab?.() ?? null
-    this.rebuildGrid(focused)
-  }
-
-  /**
    * Add a worktree pane to the fleet tab. The first pane is the root (no
    * relative); the first worktree goes to the right of root; subsequent
    * worktrees stack below the previous worktree.
@@ -347,23 +336,13 @@ export class FleetController {
     this.rebuildGrid(focusedPane)
   }
 
-  recompute(focusedId: string | null = null): void {
-    const el: any = (this.splitTab as any).elementRef?.nativeElement
-    const rect = el?.getBoundingClientRect?.() ?? { width: 0, height: 0 }
-    const panes: PaneInfo[] = [...this.paneRegistry.values()].map(e => ({
-      id: e.paneId,
-      role: e.role,
-      baselineWeight: e.role === 'root' ? 2 : 1,
-    }))
-    const weights = computeLayoutWeights(
-      panes,
-      focusedId,
-      this.profile.zoomFactor,
-      { width: rect.width, height: rect.height },
-      { width: this.profile.minPaneWidth, height: this.profile.minPaneHeight },
-      'grid',
-    )
-    this.applyRatios(weights)
+  /**
+   * Rebuild the grid using whichever pane is currently focused (per the
+   * SplitTab). Used by ResizeObserver and any out-of-band rebalance trigger.
+   */
+  recompute(): void {
+    const focused = (this.splitTab as any).getFocusedTab?.() ?? null
+    this.rebuildGrid(focused)
   }
 
   /**
