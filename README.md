@@ -2,7 +2,7 @@
 
 A [Tabby Terminal](https://tabby.sh) plugin that turns one git repo into one tab with a grid of agent panes — one per worktree.
 
-You point a profile at a repo. The plugin spawns a root pane at the repo root running your orchestrator agent, plus one pane per worktree (anywhere on disk — `git worktree list` is the source of truth) running the agent of your choice, each `cd`'d into its own worktree directory. New worktrees appear as new panes within a second. Closed panes stay closed. Focus zooms.
+You point a profile at a repo. The plugin spawns an **orchestrator** pane at the repo root, plus one **worker** pane per git worktree (anywhere on disk — `git worktree list` is the source of truth), each `cd`'d into its own worktree directory and running the agent of your choice. New worktrees appear as new worker panes within a second. Closed panes stay closed. Focus zooms.
 
 ![status](https://img.shields.io/badge/status-beta-yellow)
 
@@ -73,13 +73,13 @@ Restart Tabby.
      - **Repo path** — root of the git repo (Browse… opens a folder picker).
      - **Pre-launch command** — optional, runs once at launch (e.g. `pnpm install`).
      - **Shell** — picks one of your installed Tabby Local profiles (pwsh, bash, wsl, …).
-     - **Agent command** — what to run in each worktree pane. E.g. `claude`, `copilot`, `codex`, `opencode`. Runs in the worktree directory.
+     - **Worker command** — what runs in each worker pane. E.g. `claude`, `copilot`, `codex`, `opencode`. Cwd is the worktree directory.
      - **Filters** — include/exclude detached / prunable / locked worktrees.
      - **Notifications** — focus-on-add and worktree-change toasts.
-     - **Advanced** (collapsed) — separate orchestrator command for the root pane and title patterns.
+     - **Advanced** (collapsed) — override the orchestrator command separately and tweak title patterns. Blank orchestrator command falls back to the worker command.
    - **Themes tab:**
-     - **Orchestrator** sub-tab — pick a color scheme for the root pane.
-     - **Worker** sub-tab — pick a color scheme for the worktree panes.
+     - **Orchestrator** sub-tab — color scheme for the orchestrator pane.
+     - **Worker** sub-tab — color scheme for every worker pane.
 3. Save the profile. Open it from the profile launcher.
 
 ## What to expect
@@ -87,7 +87,7 @@ Restart Tabby.
 **On open:**
 
 - One tab opens with N panes arranged in a square-ish grid (`cols = ceil(sqrt(N))`, `rows = ceil(N / cols)`).
-- The root pane runs your orchestrator command at the repo root. Every other pane is a worktree pane running the agent at its worktree path.
+- The orchestrator pane runs at the repo root. Every other pane is a worker pane cwd'd to its worktree path. Both run the worker command unless you set an Advanced orchestrator override.
 - About 400 ms after the last pane is constructed, the plugin triggers a final layout pass so xterm + PTY + agent are all sized correctly before the agent's banner renders.
 
 **Click a pane:**
@@ -106,7 +106,7 @@ Restart Tabby.
 
 - The plugin tree-kills the agent before Tabby tears the shell down. Then it adds that worktree path to a session-local "dismissed" set so the watcher does NOT reopen the pane even if the worktree is still on disk — letting you safely `git worktree remove` after.
 
-**Close the root pane:**
+**Close the orchestrator pane:**
 
 - Confirmation modal: closes the whole fleet tab.
 

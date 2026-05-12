@@ -54,27 +54,27 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
                   </select>
                 </div>
                 <div class="form-group">
-                  <label>Agent command</label>
+                  <label>Worker command</label>
                   <input class="form-control" type="text" [(ngModel)]="profile.options.agentCommand" placeholder="e.g. claude, copilot, codex, opencode" />
-                  <small class="form-text text-muted">Runs in each pane's worktree directory.</small>
+                  <small class="form-text text-muted">Runs in each worker pane's worktree directory.</small>
                 </div>
                 <div class="form-group">
                   <button type="button" class="btn btn-link btn-sm p-0" (click)="showAdvanced = !showAdvanced">
-                    {{ showAdvanced ? '▾' : '▸' }} Advanced (override root pane separately)
+                    {{ showAdvanced ? '▾' : '▸' }} Advanced (override orchestrator separately)
                   </button>
                 </div>
                 <ng-container *ngIf="showAdvanced">
                   <div class="form-group">
-                    <label>Root (orchestrator) command</label>
-                    <input class="form-control" type="text" [(ngModel)]="profile.options.rootCommandTemplate" />
-                    <small class="form-text text-muted">Overrides Agent command for the root pane (cwd = repo path).</small>
+                    <label>Orchestrator command</label>
+                    <input class="form-control" type="text" [(ngModel)]="profile.options.rootCommandTemplate" placeholder="leave blank to use Worker command" />
+                    <small class="form-text text-muted">Override for the orchestrator pane (cwd = repo path). Blank = same as Worker command.</small>
                   </div>
                   <div class="form-group">
-                    <label>Root title</label>
+                    <label>Orchestrator title</label>
                     <input class="form-control" type="text" [(ngModel)]="profile.options.rootTitle" />
                   </div>
                   <div class="form-group">
-                    <label>Worktree pane title pattern</label>
+                    <label>Worker title pattern</label>
                     <input class="form-control" type="text" [(ngModel)]="profile.options.paneTitlePattern" />
                   </div>
                 </ng-container>

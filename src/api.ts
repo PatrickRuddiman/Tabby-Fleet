@@ -89,7 +89,7 @@ export const DEFAULT_PROFILE_OPTIONS: AgentFleetProfileOptions = {
   includeLocked: true,
   shellProfileId: null,
   agentCommand: '',
-  rootCommandTemplate: 'claude',
+  rootCommandTemplate: '',
   rootTitle: '{repo} (orchestrator)',
   paneTitlePattern: '{branch_short}',
   rootTheme: null,

@@ -207,7 +207,13 @@ export class FleetController {
     options: { isRoot?: boolean; previousPaneId?: string | null } = {},
   ): Promise<PaneEntry> {
     const isRoot = !!options.isRoot
-    const template = isRoot ? this.profile.rootCommandTemplate : this.profile.agentCommand
+    // Root pane uses rootCommandTemplate ONLY if the user explicitly set it
+    // (Advanced override). Otherwise it falls back to the shared agentCommand
+    // — matching the UI label "override root pane separately".
+    const rootOverride = (this.profile.rootCommandTemplate ?? '').trim()
+    const template = isRoot
+      ? (rootOverride !== '' ? rootOverride : this.profile.agentCommand)
+      : this.profile.agentCommand
     const titleTemplate = isRoot ? this.profile.rootTitle : this.profile.paneTitlePattern
     const color: string | null = null
 

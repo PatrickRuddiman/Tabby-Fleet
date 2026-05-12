@@ -18,8 +18,8 @@ describe('api', () => {
       assert.equal(DEFAULT_PROFILE_OPTIONS.agentCommand, '')
     })
 
-    it("rootCommandTemplate default is 'claude' (orchestrator)", () => {
-      assert.equal(DEFAULT_PROFILE_OPTIONS.rootCommandTemplate, 'claude')
+    it('rootCommandTemplate default is empty — Advanced override; falls back to agentCommand', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.rootCommandTemplate, '')
     })
 
     it('shellProfileId default is null (use Tabby default shell)', () => {
