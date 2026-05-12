@@ -1,3 +1,4 @@
+import { execFile as execFileCB } from 'child_process'
 import { renderTemplate } from '../utils/template'
 import { encodeForPwsh, escapeForPwshCommand } from '../utils/pwsh'
 
@@ -92,4 +93,50 @@ export function wrapForShell(
   }
   // Unknown shell — leave argv alone; user can override via the Advanced section.
   return { command: shellCommand, args: shellArgs }
+}
+
+/**
+ * Forcibly kill `pid` and every descendant in its process tree. Cross-platform.
+ *
+ * Windows: shells out to `taskkill /F /T /PID <pid>` which traverses the
+ * parent-child tree and force-terminates each.
+ *
+ * Unix: signals the process group (works when the target is a session/group
+ * leader, which is true for node-pty's POSIX backend via setsid), walks
+ * descendants via `pgrep -P` for any stragglers, then escalates to SIGKILL
+ * after a 200ms grace period.
+ *
+ * Always best-effort: errors are swallowed (process may already be dead, or
+ * we may lack permissions on some descendants).
+ */
+export function killProcessTree(pid: number): Promise<void> {
+  if (!pid || pid <= 0) return Promise.resolve()
+  if (process.platform === 'win32') {
+    return new Promise<void>(resolve => {
+      execFileCB('taskkill', ['/F', '/T', '/PID', String(pid)], () => resolve())
+    })
+  }
+  return killTreeUnix(pid)
+}
+
+async function killTreeUnix(pid: number): Promise<void> {
+  // Group kill first — works if pid is a session leader (node-pty sets that up).
+  try { process.kill(-pid, 'SIGTERM') } catch { /* not a group leader */ }
+  try { process.kill(pid, 'SIGTERM') } catch { /* already dead */ }
+  // Walk descendants in case the group kill missed orphans.
+  const children = await listChildrenUnix(pid)
+  for (const c of children) await killTreeUnix(c)
+  await new Promise(r => setTimeout(r, 200))
+  try { process.kill(-pid, 'SIGKILL') } catch { /* */ }
+  try { process.kill(pid, 'SIGKILL') } catch { /* */ }
+}
+
+function listChildrenUnix(pid: number): Promise<number[]> {
+  return new Promise(resolve => {
+    execFileCB('pgrep', ['-P', String(pid)], (err, stdout) => {
+      if (err) { resolve([]); return }
+      const pids = stdout.split('\n').filter(Boolean).map(s => parseInt(s, 10)).filter(n => !isNaN(n))
+      resolve(pids)
+    })
+  })
 }

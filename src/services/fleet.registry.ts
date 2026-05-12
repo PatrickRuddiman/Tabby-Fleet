@@ -11,7 +11,7 @@ import {
   RecoveredPane,
 } from '../api'
 import { computeLayoutWeights, LayoutWeights, PaneInfo } from './layout.service'
-import { wrapForShell } from './command.service'
+import { killProcessTree, wrapForShell } from './command.service'
 import {
   listFilteredWorktrees,
   validateRepoPath,
@@ -301,16 +301,37 @@ export class FleetController {
       }
     }
 
+    // Wrap session.destroy so that whenever Tabby tears down this pane (× button,
+    // shell exit, fleet close), we first tree-kill the agent and its descendants.
+    // Without this the shell dies via TerminateProcess but its child processes
+    // (claude.exe, sub-agents, watchers) become orphans that keep file handles on
+    // the worktree dir — blocking `git worktree remove` on Windows.
+    const session: any = (tab as any).session
+    if (session && typeof session.destroy === 'function' && !session.__fleetKillWrapped) {
+      const origDestroy = session.destroy.bind(session)
+      session.destroy = (...args: any[]) => {
+        // Fire-and-forget — don't block Tabby's teardown.
+        void this.killPaneChildren(tab)
+        return origDestroy(...args)
+      }
+      session.__fleetKillWrapped = true
+    }
+
     // Reshape into the grid right after attach.
     this.rebuildGrid()
 
     return entry
   }
 
-  removePaneForWorktree(worktreePath: string): void {
+  async removePaneForWorktree(worktreePath: string): Promise<void> {
     const entry = [...this.paneRegistry.values()].find(e => e.worktreePath === worktreePath)
     if (!entry) return
     entry.destroySub?.unsubscribe()
+    // Watcher-driven path: we have time to await the tree-kill before tearing
+    // the shell down, so file locks are guaranteed released before the next
+    // operation (typically the user's already-failed `git worktree remove`
+    // retry, or our own cleanup of the leftover dir).
+    await this.killPaneChildren(entry.pane)
     if (typeof (this.splitTab as any).removeTab === 'function') {
       ;(this.splitTab as any).removeTab(entry.pane)
     }
@@ -472,7 +493,7 @@ export class FleetController {
 
     for (const path of toRemove) {
       const entry = [...this.paneRegistry.values()].find(e => e.worktreePath === path)
-      this.removePaneForWorktree(path)
+      await this.removePaneForWorktree(path)
       if (this.profile.notifyOnChange) {
         this.notify('info', `Worktree closed: ${entry?.title ?? path}`)
       }
@@ -486,10 +507,10 @@ export class FleetController {
   }
 
   /** Mark a worktree path as user-dismissed; remove its pane; never re-open in this fleet. */
-  dismissPane(worktreePath: string): void {
+  async dismissPane(worktreePath: string): Promise<void> {
     this.userDismissed.add(worktreePath)
-    this.removePaneForWorktree(worktreePath)
-    this.recompute()
+    await this.removePaneForWorktree(worktreePath)
+    this.rebuildGrid()
   }
 
   /** Open the close-confirmation modal; resolve true on confirm, false on cancel. */
@@ -531,6 +552,28 @@ export class FleetController {
     if (kind === 'info' && typeof svc.info === 'function') svc.info(text, details)
     else if (kind === 'error' && typeof svc.error === 'function') svc.error(text, details)
     else if (kind === 'notice' && typeof svc.notice === 'function') svc.notice(text)
+  }
+
+  /**
+   * Enumerate the immediate children of a pane's shell PTY and force-kill
+   * each subtree. Tabby's own pty.kill() only terminates the shell process —
+   * descendants (the agent process, its sub-agents, file watchers, etc.) are
+   * left orphaned and keep file handles on the worktree directory, blocking
+   * `git worktree remove` on Windows. We kill those subtrees first so the
+   * shell's exit releases all locks cleanly.
+   */
+  private async killPaneChildren(pane: any): Promise<void> {
+    const session: any = pane?.session
+    if (!session || typeof session.getChildProcesses !== 'function') return
+    let children: any[] = []
+    try {
+      children = (await session.getChildProcesses()) ?? []
+    } catch { return }
+    const pids = children
+      .map(c => typeof c?.pid === 'number' ? c.pid : null)
+      .filter((p): p is number => p !== null && p > 0)
+    if (pids.length === 0) return
+    await Promise.all(pids.map(p => killProcessTree(p)))
   }
 
   /**
