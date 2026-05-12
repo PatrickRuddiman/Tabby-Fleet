@@ -36,6 +36,10 @@
     "test": "cross-env \"TS_NODE_COMPILER_OPTIONS={\\\"module\\\":\\\"commonjs\\\"}\" mocha",
     "prepublishOnly": "npm run build"
   },
+  "overrides": {
+    "diff": "^9.0.0",
+    "serialize-javascript": "^7.0.5"
+  },
   "peerDependencies": {
     "@angular/common": "^15",
     "@angular/core": "^15",
@@ -55,23 +59,23 @@
     "@ng-bootstrap/ng-bootstrap": "^14.2.0",
     "@ngtools/webpack": "^15.2.11",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^20.10.0",
-    "babel-loader": "^9.2.1",
+    "@types/node": "^20.19.41",
+    "babel-loader": "^10.1.1",
     "cross-env": "^10.1.0",
-    "css-loader": "^6.11.0",
-    "mocha": "^10.8.2",
+    "css-loader": "^7.1.4",
+    "mocha": "^11.7.5",
     "raw-loader": "^4.0.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "sass": "^1.99.0",
-    "sass-loader": "^13.3.3",
-    "source-map-loader": "^4.0.2",
-    "style-loader": "^3.3.4",
+    "sass-loader": "^16.0.8",
+    "source-map-loader": "^5.0.0",
+    "style-loader": "^4.0.0",
     "ts-loader": "^9.5.0",
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
     "typescript": "~4.8",
     "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.0"
+    "webpack-cli": "^7.0.2"
   }
 }
