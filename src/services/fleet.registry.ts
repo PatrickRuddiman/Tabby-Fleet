@@ -2,7 +2,7 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import { Injectable } from '@angular/core'
 import { Subscription } from 'rxjs'
-import { NotificationsService, SplitTabComponent } from 'tabby-core'
+import { NotificationsService, ProfilesService, SplitContainer, SplitTabComponent, TabsService } from 'tabby-core'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import {
   AgentFleetProfileOptions,
@@ -11,7 +11,7 @@ import {
   RecoveredPane,
 } from '../api'
 import { computeLayoutWeights, LayoutWeights, PaneInfo } from './layout.service'
-import { buildSpawnDescriptor, SpawnDescriptor } from './command.service'
+import { wrapForShell } from './command.service'
 import {
   listFilteredWorktrees,
   validateRepoPath,
@@ -28,6 +28,9 @@ const execAsync = promisify(exec)
 export interface FleetControllerDeps {
   notifications?: NotificationsService
   modal?: NgbModal
+  tabsService?: TabsService
+  profilesService?: ProfilesService
+  resolveTheme?: (name: string | null) => Promise<any | null>
 }
 
 interface PaneEntry {
@@ -42,6 +45,7 @@ interface PaneEntry {
   recovered: boolean
   baselineWeight: number
   overlayRef?: any
+  destroySub?: Subscription
 }
 
 /**
@@ -110,24 +114,97 @@ export class FleetController {
     if (this.watcher && typeof this.watcher.stop === 'function') {
       this.watcher.stop()
     }
+    for (const entry of this.paneRegistry.values()) {
+      entry.destroySub?.unsubscribe()
+    }
     this.paneRegistry.clear()
     this.userDismissed.clear()
   }
 
   /**
-   * Apply weights to the SplitContainer.ratios arrays then trigger a single
-   * synchronous layout pass. Real ratio mutation walks the tree via
-   * splitTab.getParentOf; here we record weights on the entry and call layout()
-   * so downstream UI math runs.
+   * Reshape `splitTab.root` into a grid:
+   *   - Outer container is vertical, holding one row per grid row.
+   *   - Each row container is horizontal, holding that row's panes.
+   * Grid dimensions: cols = ceil(sqrt(N)), rows = ceil(N / cols).
+   * Pane order in the grid follows insertion order from `paneRegistry` (root
+   * pane first, then worktrees as they were added).
+   *
+   * If `focusedPane` is provided, that row gets a larger row ratio and the
+   * pane gets a larger column ratio within its row — visible zoom-on-focus.
+   * Pass `null` for a uniform layout.
+   *
+   * Tab instances are reused (we move references, not recreate them) so PTYs
+   * stay alive across rebuilds.
    */
-  applyRatios(weights: LayoutWeights[]): void {
-    for (const w of weights) {
-      const entry = this.paneRegistry.get(w.paneId)
-      if (entry) entry.baselineWeight = w.weight
+  rebuildGrid(focusedPane: any = null): void {
+    const entries = [...this.paneRegistry.values()]
+    if (entries.length === 0) return
+
+    const N = entries.length
+    const cols = Math.ceil(Math.sqrt(N))
+    const rows = Math.ceil(N / cols)
+    const zoom = Math.max(1, this.profile.zoomFactor || 1)
+
+    // Partition panes into rows (row-major).
+    const rowGroups: PaneEntry[][] = []
+    for (let r = 0; r < rows; r++) {
+      rowGroups.push(entries.slice(r * cols, (r + 1) * cols))
     }
-    if (typeof (this.splitTab as any).layout === 'function') {
-      ;(this.splitTab as any).layout()
+
+    // Locate focused pane in the grid.
+    let focusedRow = -1
+    let focusedCol = -1
+    if (focusedPane) {
+      for (let r = 0; r < rowGroups.length; r++) {
+        const c = rowGroups[r].findIndex(e => e.pane === focusedPane)
+        if (c >= 0) { focusedRow = r; focusedCol = c; break }
+      }
     }
+
+    // Row weights → outer vertical ratios.
+    const rowWeights = rowGroups.map((_, r) => (r === focusedRow ? zoom : 1))
+    const rowTotal = rowWeights.reduce((a, b) => a + b, 0)
+    const outerRatios = rowWeights.map(w => w / rowTotal)
+
+    // Build new tree.
+    const outer = new SplitContainer()
+    outer.orientation = 'v'
+    outer.children = []
+    outer.ratios = []
+    for (let r = 0; r < rowGroups.length; r++) {
+      const group = rowGroups[r]
+      const colWeights = group.map((_, c) => (r === focusedRow && c === focusedCol) ? zoom : 1)
+      const colTotal = colWeights.reduce((a, b) => a + b, 0)
+      const colRatios = colWeights.map(w => w / colTotal)
+
+      // Single pane in a row: don't bother nesting a horizontal container,
+      // just put the pane directly in the outer column.
+      if (group.length === 1) {
+        outer.children.push(group[0].pane)
+        outer.ratios.push(outerRatios[r])
+      } else {
+        const rowContainer = new SplitContainer()
+        rowContainer.orientation = 'h'
+        rowContainer.children = group.map(e => e.pane)
+        rowContainer.ratios = colRatios
+        outer.children.push(rowContainer)
+        outer.ratios.push(outerRatios[r])
+      }
+    }
+
+    const splitTabAny = this.splitTab as any
+    splitTabAny.root = outer
+    if (typeof splitTabAny.layout === 'function') splitTabAny.layout()
+  }
+
+  /**
+   * Backwards-compatible shim. Old code paths (recompute, watcher diff) call
+   * applyRatios; route them through rebuildGrid so a single mechanism owns
+   * the layout.
+   */
+  applyRatios(_weights: LayoutWeights[]): void {
+    const focused = (this.splitTab as any).getFocusedTab?.() ?? null
+    this.rebuildGrid(focused)
   }
 
   /**
@@ -141,58 +218,99 @@ export class FleetController {
     options: { isRoot?: boolean; previousPaneId?: string | null } = {},
   ): Promise<PaneEntry> {
     const isRoot = !!options.isRoot
-    const template = isRoot ? this.profile.rootCommandTemplate : this.profile.commandTemplate
+    const template = isRoot ? this.profile.rootCommandTemplate : this.profile.agentCommand
     const titleTemplate = isRoot ? this.profile.rootTitle : this.profile.paneTitlePattern
-    const color = isRoot ? this.profile.rootColor : this.profile.paneColor
+    const color: string | null = null
 
     const vars = worktreeToVars(wt, repo)
-    const descriptor: SpawnDescriptor = buildSpawnDescriptor(template, vars, wt.path, {
-      shell: this.profile.shell,
-      shellArgs: this.profile.shellArgs,
-      encoding: this.profile.encoding,
-    })
+    const agentCommand = render(template, vars)
     const title = render(titleTemplate, vars)
-    const pane: any = { id: `pane-${this.paneRegistry.size}`, descriptor, title, destroyed$: null }
 
-    let relative: any = null
-    let side: 't' | 'r' | 'b' | 'l' = 'r'
-    if (isRoot) {
-      relative = null
-      side = 'r'
-    } else if (this.paneRegistry.size === 1) {
-      // First worktree pane lives to the right of the root pane.
-      const root = [...this.paneRegistry.values()].find(p => p.role === 'root')
-      relative = root?.pane ?? null
-      side = 'r'
-    } else {
-      const prev = options.previousPaneId
-        ? this.paneRegistry.get(options.previousPaneId)?.pane
-        : [...this.paneRegistry.values()].filter(p => p.role === 'worktree').slice(-1)[0]?.pane
-      relative = prev ?? null
-      side = 'b'
+    if (!this.deps.tabsService || !this.deps.profilesService) {
+      throw new Error('FleetController missing tabsService/profilesService deps')
     }
 
-    await this.splitTab.add(pane, relative, side)
+    const localProfile = await this.resolveShellProfile()
+    if (!localProfile) {
+      this.notify('error', 'Agent Fleet: no local shell profile available')
+      throw new Error('no local shell profile')
+    }
 
+    const baseOptions = (localProfile as any).options ?? {}
+    const wrapped = wrapForShell(baseOptions.command ?? '', baseOptions.args ?? [], agentCommand)
+    const themeName = isRoot ? this.profile.rootTheme : this.profile.worktreeTheme
+    const resolvedScheme = this.deps.resolveTheme ? await this.deps.resolveTheme(themeName) : null
+    const clonedProfile: any = {
+      ...localProfile,
+      id: `agent-fleet:${isRoot ? 'root' : 'wt'}:${this.paneRegistry.size}`,
+      name: title,
+      isBuiltin: false,
+      isTemplate: false,
+      // Tabby's TerminalTab reads profile.terminalColorScheme (top-level, not
+      // inside options) for the active scheme. Resolved scheme object — not a
+      // { name } stub — is what `configureColors` consumes.
+      ...(resolvedScheme ? { terminalColorScheme: resolvedScheme } : {}),
+      options: {
+        ...baseOptions,
+        cwd: wt.path,
+        command: wrapped.command,
+        args: wrapped.args,
+      },
+    }
+
+    const provider = this.deps.profilesService.providerForProfile(clonedProfile)
+    if (!provider) {
+      this.notify('error', `Agent Fleet: no profile provider for type "${clonedProfile.type}"`)
+      throw new Error('no provider')
+    }
+    const params = await provider.getNewTabParameters(clonedProfile as any)
+    const tab: any = this.deps.tabsService.create(params)
+    if (typeof tab.setTitle === 'function') tab.setTitle(title)
+
+    // Attach the tab through Tabby's normal lifecycle (DOM mount, PTY spawn,
+    // tab-event registration). The 'side' here is irrelevant — `rebuildGrid`
+    // will replace splitTab.root immediately afterwards with the correct grid
+    // tree. We just need add() to wire `tab.parent` and run attachTabView.
+    const lastEntry = [...this.paneRegistry.values()].slice(-1)[0]
+    const relative: any = isRoot ? null : (lastEntry?.pane ?? null)
+    await this.splitTab.add(tab, relative, 'r')
+
+    const paneId = clonedProfile.id
     const entry: PaneEntry = {
-      paneId: pane.id,
-      pane,
+      paneId,
+      pane: tab,
       role: isRoot ? 'root' : 'worktree',
       worktreePath: wt.path,
       branch: wt.branch,
-      command: descriptor.command + ' ' + descriptor.args.join(' '),
+      command: `${wrapped.command} ${wrapped.args.join(' ')}`.trim(),
       title,
       color,
       recovered: false,
       baselineWeight: isRoot ? 2 : 1,
     }
-    this.paneRegistry.set(pane.id, entry)
+    this.paneRegistry.set(paneId, entry)
+
+    if (!isRoot) {
+      const destroyed$: any = tab.destroyed$ ?? tab.closed$
+      if (destroyed$ && typeof destroyed$.subscribe === 'function') {
+        entry.destroySub = destroyed$.subscribe(() => {
+          this.userDismissed.add(entry.worktreePath)
+          this.paneRegistry.delete(entry.paneId)
+          this.rebuildGrid()
+        })
+      }
+    }
+
+    // Reshape into the grid right after attach.
+    this.rebuildGrid()
+
     return entry
   }
 
   removePaneForWorktree(worktreePath: string): void {
     const entry = [...this.paneRegistry.values()].find(e => e.worktreePath === worktreePath)
     if (!entry) return
+    entry.destroySub?.unsubscribe()
     if (typeof (this.splitTab as any).removeTab === 'function') {
       ;(this.splitTab as any).removeTab(entry.pane)
     }
@@ -200,7 +318,12 @@ export class FleetController {
   }
 
   private onFocusChange(focused: any): void {
-    this.recompute(focused?.id ?? null)
+    // Tabby's tab components don't carry our paneId. Identify the focused
+    // pane by reference equality against the registry.
+    const focusedPane = focused && [...this.paneRegistry.values()].some(e => e.pane === focused)
+      ? focused
+      : null
+    this.rebuildGrid(focusedPane)
   }
 
   recompute(focusedId: string | null = null): void {
@@ -217,7 +340,7 @@ export class FleetController {
       this.profile.zoomFactor,
       { width: rect.width, height: rect.height },
       { width: this.profile.minPaneWidth, height: this.profile.minPaneHeight },
-      this.profile.layoutMode,
+      'grid',
     )
     this.applyRatios(weights)
   }
@@ -236,8 +359,9 @@ export class FleetController {
     }
 
     const valid = await validateRepoPath(repoPath)
-    if (!valid.ok) {
-      this.notify('error', 'Not a git repository', `${repoPath}: ${valid.error.message}`)
+    if (valid.ok !== true) {
+      const err = (valid as { ok: false; error: { message: string } }).error
+      this.notify('error', 'Not a git repository', `${repoPath}: ${err.message}`)
       return
     }
 
@@ -257,46 +381,46 @@ export class FleetController {
 
     const filterOptions = {
       repoPath,
-      worktreePathPrefix: this.profile.worktreePathPrefix,
       includeDetached: this.profile.includeDetached,
       includePrunable: this.profile.includePrunable,
       includeLocked: this.profile.includeLocked,
     }
     const listed: ListResult = await listFilteredWorktrees(repoPath, filterOptions)
-    if (!listed.ok) {
-      this.notify('error', 'Failed to list worktrees', listed.error.message)
+    if (listed.ok !== true) {
+      const err = (listed as { ok: false; error: { message: string } }).error
+      this.notify('error', 'Failed to list worktrees', err.message)
       return
     }
+    const okListed = listed as { ok: true; value: { repo: RepoInfo; worktrees: Worktree[] } }
+    this.repoInfo = okListed.value.repo
 
-    this.repoInfo = listed.value.repo
-
-    // Attach watcher.
-    const desiredMode = this.profile.watchMode === 'off' ? null : (this.profile.watchMode as 'fs' | 'poll')
-    if (desiredMode) {
-      this.watcher = new WorktreeWatcher(repoPath, () => { void this.onWatcherChange() })
-      this.watcher.start(desiredMode, this.profile.pollIntervalMs)
-      const mode = this.watcher.actualMode
-      this.notify(
-        'notice',
-        mode === 'fs' ? 'Watch mode: filesystem events' : 'Watch mode: polling (filesystem watch unavailable)',
-      )
-    }
+    // Attach watcher (adaptive `git worktree list` poller).
+    this.watcher = new WorktreeWatcher(repoPath, () => { void this.onWatcherChange() })
+    this.watcher.start()
 
     // Build initial pane set (root + filtered worktrees).
     let previousPaneId: string | null = null
-    for (const wt of listed.value.worktrees) {
+    const repoInfo = this.repoInfo
+    for (const wt of okListed.value.worktrees) {
       const previousFocused = (this.splitTab as any).getFocusedTab?.()
-      const entry = await this.addPaneForWorktree(wt, this.repoInfo, {
+      const entry: PaneEntry = await this.addPaneForWorktree(wt, repoInfo, {
         isRoot: wt.isMain,
         previousPaneId,
       })
       previousPaneId = entry.paneId
+      // Tabby's onAfterTabAdded queues `focus(newTab)` on setImmediate; restore
+      // via setTimeout(…, 0) which runs after that setImmediate fires.
       if (!this.profile.stealFocusOnAdd && previousFocused) {
-        ;(this.splitTab as any).focus?.(previousFocused)
+        setTimeout(() => (this.splitTab as any).focus?.(previousFocused), 0)
       }
     }
 
-    this.recompute()
+    // Final settle: wait for xterm + PTY + agent process to finish their
+    // startup writes, then force one more grid pass. xterm doesn't reflow
+    // already-rendered rows on resize, so the goal is to make sure the
+    // final pane dims are propagated to the PTY before the agent's prompt
+    // begins drawing.
+    setTimeout(() => this.rebuildGrid(), 400)
   }
 
   /** Re-list, diff against current worktree panes, add/remove, rebalance. */
@@ -304,16 +428,16 @@ export class FleetController {
     if (!this.repoInfo) return
     const filterOptions = {
       repoPath: this.repoInfo.path,
-      worktreePathPrefix: this.profile.worktreePathPrefix,
       includeDetached: this.profile.includeDetached,
       includePrunable: this.profile.includePrunable,
       includeLocked: this.profile.includeLocked,
     }
     const listed = await listFilteredWorktrees(this.repoInfo.path, filterOptions)
-    if (!listed.ok) return
+    if (listed.ok !== true) return
+    const okWatch = listed as { ok: true; value: { repo: RepoInfo; worktrees: Worktree[] } }
 
     const incoming = new Map(
-      listed.value.worktrees.filter(w => !w.isMain).map(w => [w.path, w]),
+      okWatch.value.worktrees.filter(w => !w.isMain).map(w => [w.path, w]),
     )
     const currentPaths = new Set(
       [...this.paneRegistry.values()].filter(e => e.role === 'worktree').map(e => e.worktreePath),
@@ -337,7 +461,7 @@ export class FleetController {
         const previousFocused = (this.splitTab as any).getFocusedTab?.()
         const entry = await this.addPaneForWorktree(wt, this.repoInfo)
         if (!this.profile.stealFocusOnAdd && previousFocused) {
-          ;(this.splitTab as any).focus?.(previousFocused)
+          setTimeout(() => (this.splitTab as any).focus?.(previousFocused), 0)
         }
         if (this.profile.notifyOnChange) {
           this.notify('info', `Worktree added: ${entry.title}`)
@@ -355,7 +479,10 @@ export class FleetController {
       changed = true
     }
 
-    if (changed) this.recompute()
+    if (changed) {
+      this.rebuildGrid()
+      setTimeout(() => this.rebuildGrid(), 400)
+    }
   }
 
   /** Mark a worktree path as user-dismissed; remove its pane; never re-open in this fleet. */
@@ -404,6 +531,24 @@ export class FleetController {
     if (kind === 'info' && typeof svc.info === 'function') svc.info(text, details)
     else if (kind === 'error' && typeof svc.error === 'function') svc.error(text, details)
     else if (kind === 'notice' && typeof svc.notice === 'function') svc.notice(text)
+  }
+
+  /**
+   * Find the Tabby Local profile the user selected for fleet panes. Falls back
+   * to the first available local profile when `shellProfileId` is null or the
+   * stored id no longer resolves (the user deleted that profile, etc.).
+   */
+  private async resolveShellProfile(): Promise<any | null> {
+    const svc = this.deps.profilesService as any
+    if (!svc || typeof svc.getProfiles !== 'function') return null
+    const wanted = this.profile.shellProfileId
+    const all: any[] = await svc.getProfiles({ includeBuiltin: true })
+    const byId = wanted ? all.find(p => p?.id === wanted) : null
+    if (byId) return byId
+    const locals = all.filter(p => p?.type === 'local')
+    if (locals.length > 0) return locals[0]
+    const fallback = all.find(p => p && !p.isTemplate && p.type !== 'agent-fleet' && p.options?.command)
+    return fallback ?? null
   }
 
   serialize(): AgentFleetRecoveryToken {

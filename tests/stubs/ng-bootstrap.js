@@ -11,13 +11,11 @@ class NgbActiveModal {
   close() {}
   dismiss() {}
 }
-class NgbAccordionModule {}
-class NgbModalModule {}
+class NgbModule {}
 
 module.exports = {
   NgbModal,
   NgbModalRef,
   NgbActiveModal,
-  NgbAccordionModule,
-  NgbModalModule,
+  NgbModule,
 }

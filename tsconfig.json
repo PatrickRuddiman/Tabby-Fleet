@@ -1,20 +1,31 @@
 {
   "compilerOptions": {
-    "target": "es2020",
-    "module": "commonjs",
-    "lib": ["es2020", "dom"],
-    "outDir": "./dist",
-    "rootDir": ".",
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
+    "module": "es2015",
+    "target": "es2016",
     "moduleResolution": "node",
-    "forceConsistentCasingInFileNames": true,
-    "declaration": false,
-    "sourceMap": true
+    "baseUrl": "src",
+    "noImplicitAny": false,
+    "removeComments": false,
+    "emitDeclarationOnly": false,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "sourceMap": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "importHelpers": true,
+    "strictNullChecks": true,
+    "lib": ["DOM", "ES5", "ES6", "ES7", "ES2015", "ES2017", "ES2019", "ES2021"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "angularCompilerOptions": {
+    "strictTemplates": false,
+    "enableResourceInlining": true,
+    "strictInjectionParameters": true
+  },
+  "exclude": ["node_modules", "dist", "tests"],
+  "include": ["src/**/*.ts"]
 }

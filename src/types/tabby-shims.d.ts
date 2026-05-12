@@ -12,7 +12,12 @@ declare module 'tabby-core' {
     icon?: string | null
     isBuiltin?: boolean
   }
-  export type PartialProfile<P extends Profile = Profile> = Partial<P> & { options?: Partial<P['options']> }
+  export type PartialProfile<P extends Profile = Profile> = Partial<P> & {
+    options?: Partial<P['options']>
+    isTemplate?: boolean
+    weight?: number
+    icon?: string
+  }
 
   export interface NewTabParameters<T = any> {
     type: any
@@ -42,9 +47,20 @@ declare module 'tabby-core' {
     focusChanged$: any
     initialized$: any
     destroyed$: any
+    root: SplitContainer
   }
 
-  export class TabbyCoreModule {}
+  export class SplitContainer {
+    orientation: 'h' | 'v'
+    children: any[]
+    ratios: number[]
+    getAllTabs(): any[]
+    normalize(): void
+  }
+
+  // Default export — the module class. Real name in tabby-core is AppModule.
+  const TabbyCoreModule: any
+  export default TabbyCoreModule
 
   export abstract class TabRecoveryProvider<T = any> {
     abstract applicableTo(token: any): Promise<boolean>
@@ -66,15 +82,43 @@ declare module 'tabby-core' {
   export class AppService {
     openNewTab(params: NewTabParameters): any
     activeTab: any
+    tabOpened$: any
+    tabsChanged$: any
+  }
+
+  export class TabsService {
+    create(params: { type: any; inputs?: Record<string, any> }): any
+  }
+
+  export abstract class PlatformService {
+    abstract pickDirectory(title?: string, buttonLabel?: string): Promise<string | null>
+  }
+
+  export class ProfilesService {
+    getProfiles(options?: { includeBuiltin?: boolean }): Promise<Profile[]>
+    providerForProfile<P extends Profile = Profile>(profile: PartialProfile<P>): ProfileProvider<P> | null
   }
 }
 
 declare module 'tabby-terminal' {
-  export class TabbyTerminalModule {}
+  const TabbyTerminalModule: any
+  export default TabbyTerminalModule
+  export interface TerminalColorScheme {
+    name: string
+    foreground?: string
+    background?: string
+    cursor?: string
+    colors?: string[]
+    [key: string]: any
+  }
+  export abstract class TerminalColorSchemeProvider {
+    abstract getSchemes(): Promise<TerminalColorScheme[]>
+  }
 }
 
 declare module 'tabby-settings' {
-  export class TabbySettingsModule {}
+  const TabbySettingsModule: any
+  export default TabbySettingsModule
   export abstract class SettingsTabProvider {
     abstract id: string
     abstract title: string
@@ -85,6 +129,10 @@ declare module 'tabby-settings' {
 
 declare module '@angular/forms' {
   export class FormsModule {}
+}
+
+declare module '@angular/common' {
+  export class CommonModule {}
 }
 
 declare module '@ng-bootstrap/ng-bootstrap' {
@@ -99,6 +147,5 @@ declare module '@ng-bootstrap/ng-bootstrap' {
     close(result?: any): void
     dismiss(reason?: any): void
   }
-  export class NgbAccordionModule {}
-  export class NgbModalModule {}
+  export class NgbModule {}
 }

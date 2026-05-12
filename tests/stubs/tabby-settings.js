@@ -1,3 +1,7 @@
 class TabbySettingsModule {}
 class SettingsTabProvider {}
-module.exports = { TabbySettingsModule, SettingsTabProvider }
+module.exports = {
+  default: TabbySettingsModule,
+  TabbySettingsModule,
+  SettingsTabProvider,
+}

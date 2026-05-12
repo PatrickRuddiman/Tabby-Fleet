@@ -1,3 +1,4 @@
+import { Injectable } from '@angular/core'
 import {
   NewTabParameters,
   PartialProfile,
@@ -6,26 +7,39 @@ import {
   SplitTabComponent,
 } from 'tabby-core'
 import { AgentFleetProfileOptions, DEFAULT_PROFILE_OPTIONS } from '../api'
+import { AgentFleetProfileSettingsComponent } from '../components/settings.component'
+import { FleetBootstrap } from '../services/fleet.bootstrap'
 
 type AgentFleetProfile = Profile<AgentFleetProfileOptions>
 
+@Injectable()
 export class AgentFleetProfileProvider extends ProfileProvider<AgentFleetProfile> {
   id = 'agent-fleet'
   name = 'Agent Fleet'
 
   configDefaults = { options: DEFAULT_PROFILE_OPTIONS }
 
-  // Settings component is wired in task 022's final NgModule wire-up. Leaving
-  // this null here keeps the provider standalone for task 014.
-  settingsComponent: any = null
+  settingsComponent = AgentFleetProfileSettingsComponent
+
+  // Injecting FleetBootstrap here is what eagerly instantiates the bootstrap
+  // service at app startup (ProfileProvider multi-providers are resolved during
+  // bootstrap). The bootstrap then subscribes to AppService.tabOpened$.
+  constructor(_bootstrap: FleetBootstrap) {
+    super()
+  }
 
   async getBuiltinProfiles(): Promise<PartialProfile<AgentFleetProfile>[]> {
     return [
       {
-        name: 'Agent Fleet (current dir)',
+        id: 'agent-fleet:template',
         type: 'agent-fleet',
+        name: 'Agent Fleet',
+        icon: 'fas fa-code-branch',
         options: { ...DEFAULT_PROFILE_OPTIONS },
-      },
+        isBuiltin: true,
+        isTemplate: true,
+        weight: -1,
+      } as PartialProfile<AgentFleetProfile>,
     ]
   }
 

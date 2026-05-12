@@ -9,7 +9,13 @@ import { AgentFleetProfileOptions, DEFAULT_PROFILE_OPTIONS } from '../api'
  */
 @Component({
   selector: 'agent-fleet-defaults-tab',
-  templateUrl: './defaults-tab.component.pug',
+  template: `
+    <div class="fleet-defaults-tab">
+      <h3>Agent Fleet defaults</h3>
+      <p class="text-muted">These settings seed every new Agent Fleet profile. Existing profiles keep their current values.</p>
+      <agent-fleet-profile-settings [profile]="profile" (change)="onChange()"></agent-fleet-profile-settings>
+    </div>
+  `,
 })
 export class AgentFleetDefaultsTabComponent {
   profile: { options: AgentFleetProfileOptions }

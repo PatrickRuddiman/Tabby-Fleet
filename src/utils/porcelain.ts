@@ -13,7 +13,6 @@ export interface Worktree {
 
 export interface FilterOptions {
   repoPath: string
-  worktreePathPrefix: string
   includeDetached: boolean
   includePrunable: boolean
   includeLocked: boolean
@@ -73,13 +72,7 @@ export function filterAndSortWorktrees(all: Worktree[], options: FilterOptions):
   const main = all[0]
   const candidates = all.slice(1)
 
-  const isWindows = process.platform === 'win32'
-  const expectedPrefix = joinPrefix(options.repoPath, options.worktreePathPrefix)
-  const cmpPrefix = isWindows ? expectedPrefix.toLowerCase() : expectedPrefix
-
   const filtered = candidates.filter(wt => {
-    const candidatePath = isWindows ? wt.path.toLowerCase() : wt.path
-    if (!candidatePath.startsWith(cmpPrefix)) return false
     if (wt.branch === null && !options.includeDetached) return false
     if (wt.prunable && !options.includePrunable) return false
     if (wt.locked && !options.includeLocked) return false
@@ -88,12 +81,4 @@ export function filterAndSortWorktrees(all: Worktree[], options: FilterOptions):
 
   filtered.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   return [main, ...filtered]
-}
-
-function joinPrefix(repoPath: string, prefix: string): string {
-  // Normalise to git's forward-slash style. Strip trailing slash from repoPath,
-  // strip leading slash from prefix, then join.
-  const repoNorm = repoPath.replace(/\\/g, '/').replace(/\/+$/, '')
-  const prefixNorm = prefix.replace(/\\/g, '/').replace(/^\/+/, '')
-  return repoNorm + '/' + prefixNorm
 }

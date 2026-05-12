@@ -15,6 +15,7 @@ const ALIASES = {
   'tabby-settings': path.join(__dirname, '..', 'stubs', 'tabby-settings.js'),
   '@ng-bootstrap/ng-bootstrap': path.join(__dirname, '..', 'stubs', 'ng-bootstrap.js'),
   '@angular/forms': path.join(__dirname, '..', 'stubs', 'angular-forms.js'),
+  '@angular/common': path.join(__dirname, '..', 'stubs', 'angular-common.js'),
 }
 
 const origResolve = Module._resolveFilename

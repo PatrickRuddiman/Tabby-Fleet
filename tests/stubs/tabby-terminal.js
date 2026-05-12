@@ -1,2 +1,2 @@
 class TabbyTerminalModule {}
-module.exports = { TabbyTerminalModule }
+module.exports = { default: TabbyTerminalModule, TabbyTerminalModule }

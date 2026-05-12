@@ -94,6 +94,7 @@ class AppService {
 }
 
 module.exports = {
+  default: TabbyCoreModule,
   ProfileProvider,
   TabRecoveryProvider,
   TabbyCoreModule,

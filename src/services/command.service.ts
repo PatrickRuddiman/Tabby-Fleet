@@ -51,3 +51,42 @@ export function buildSpawnDescriptor(
 export function renderTitle(template: string, vars: Record<string, string>): string {
   return renderTemplate(template, vars)
 }
+
+/**
+ * Override a Tabby Local profile's shell argv so the shell auto-executes
+ * `agentCommand` on startup and stays interactive afterwards. Shell is
+ * detected by the basename of `shellCommand` (the local profile's
+ * `options.command`). Returns the original argv unchanged when `agentCommand`
+ * is empty or the shell is unrecognised.
+ */
+export function wrapForShell(
+  shellCommand: string,
+  shellArgs: string[],
+  agentCommand: string,
+): { command: string; args: string[] } {
+  if (!agentCommand || !agentCommand.trim()) {
+    return { command: shellCommand, args: shellArgs }
+  }
+  const base = (shellCommand || '').toLowerCase().replace(/\\/g, '/').split('/').pop() ?? ''
+  if (/^(pwsh|powershell)(\.exe)?$/.test(base)) {
+    return { command: shellCommand, args: ['-NoExit', '-Command', agentCommand] }
+  }
+  if (/^cmd(\.exe)?$/.test(base)) {
+    return { command: shellCommand, args: ['/K', agentCommand] }
+  }
+  if (/^wsl(\.exe)?$/.test(base)) {
+    return {
+      command: shellCommand,
+      args: [...shellArgs, '--', 'bash', '-i', '-c', `${agentCommand}; exec bash`],
+    }
+  }
+  if (/^fish(\.exe)?$/.test(base)) {
+    return { command: shellCommand, args: ['-i', '-C', agentCommand] }
+  }
+  if (/^(bash|zsh|sh|dash|ash)(\.exe)?$/.test(base)) {
+    const shellName = base.replace(/\.exe$/, '')
+    return { command: shellCommand, args: ['-i', '-c', `${agentCommand}; exec ${shellName}`] }
+  }
+  // Unknown shell — leave argv alone; user can override via the Advanced section.
+  return { command: shellCommand, args: shellArgs }
+}
