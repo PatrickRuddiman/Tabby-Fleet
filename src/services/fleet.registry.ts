@@ -207,12 +207,16 @@ export class FleetController {
     options: { isRoot?: boolean; previousPaneId?: string | null } = {},
   ): Promise<PaneEntry> {
     const isRoot = !!options.isRoot
-    // Root pane uses rootCommandTemplate ONLY if the user explicitly set it
-    // (Advanced override). Otherwise it falls back to the shared agentCommand
-    // — matching the UI label "override root pane separately".
+    // Orchestrator pane resolution:
+    //   - shell-only flag wins → empty template → wrapForShell returns the
+    //     bare shell argv (just a plain shell, no agent)
+    //   - else rootCommandTemplate if explicitly set (Advanced override)
+    //   - else fall back to the shared agentCommand
     const rootOverride = (this.profile.rootCommandTemplate ?? '').trim()
     const template = isRoot
-      ? (rootOverride !== '' ? rootOverride : this.profile.agentCommand)
+      ? (this.profile.orchestratorShellOnly
+          ? ''
+          : rootOverride !== '' ? rootOverride : this.profile.agentCommand)
       : this.profile.agentCommand
     const titleTemplate = isRoot ? this.profile.rootTitle : this.profile.paneTitlePattern
     const color: string | null = null

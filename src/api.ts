@@ -18,6 +18,10 @@ export interface AgentFleetProfileOptions {
   shellProfileId: string | null
   agentCommand: string
   rootCommandTemplate: string
+  // When true the orchestrator pane skips running any agent and just opens
+  // the chosen shell — for users who want to drive `git worktree add/remove`
+  // by hand from the orchestrator.
+  orchestratorShellOnly: boolean
   rootTitle: string
   paneTitlePattern: string
   // Themes (Tabby terminal color scheme names)
@@ -90,6 +94,7 @@ export const DEFAULT_PROFILE_OPTIONS: AgentFleetProfileOptions = {
   shellProfileId: null,
   agentCommand: '',
   rootCommandTemplate: '',
+  orchestratorShellOnly: false,
   rootTitle: '{repo} (orchestrator)',
   paneTitlePattern: '{branch_short}',
   rootTheme: null,

@@ -64,10 +64,25 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
                   </button>
                 </div>
                 <ng-container *ngIf="showAdvanced">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="fleet-orch-shell-only"
+                           [(ngModel)]="profile.options.orchestratorShellOnly" />
+                    <label class="form-check-label" for="fleet-orch-shell-only">
+                      Orchestrator: shell only (skip the agent in the orchestrator pane)
+                    </label>
+                    <small class="form-text text-muted">
+                      Leaves the orchestrator pane as a bare shell at the repo root —
+                      for manually driving <code>git worktree add/remove</code>.
+                      Worker panes still run the agent.
+                    </small>
+                  </div>
                   <div class="form-group">
                     <label>Orchestrator command</label>
-                    <input class="form-control" type="text" [(ngModel)]="profile.options.rootCommandTemplate" placeholder="leave blank to use Worker command" />
-                    <small class="form-text text-muted">Override for the orchestrator pane (cwd = repo path). Blank = same as Worker command.</small>
+                    <input class="form-control" type="text"
+                           [(ngModel)]="profile.options.rootCommandTemplate"
+                           [disabled]="profile.options.orchestratorShellOnly"
+                           placeholder="leave blank to use Worker command" />
+                    <small class="form-text text-muted">Override for the orchestrator pane (cwd = repo path). Blank = same as Worker command. Ignored when "shell only" is checked.</small>
                   </div>
                   <div class="form-group">
                     <label>Orchestrator title</label>
