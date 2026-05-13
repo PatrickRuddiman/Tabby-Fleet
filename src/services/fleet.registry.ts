@@ -30,6 +30,7 @@ export interface FleetControllerDeps {
   tabsService?: TabsService
   profilesService?: ProfilesService
   resolveTheme?: (name: string | null) => Promise<any | null>
+  randomTheme?: () => Promise<any | null>
 }
 
 interface PaneEntry {
@@ -237,8 +238,16 @@ export class FleetController {
 
     const baseOptions = (localProfile as any).options ?? {}
     const wrapped = wrapForShell(baseOptions.command ?? '', baseOptions.args ?? [], agentCommand)
-    const themeName = isRoot ? this.profile.rootTheme : this.profile.worktreeTheme
-    const resolvedScheme = this.deps.resolveTheme ? await this.deps.resolveTheme(themeName) : null
+    // Worker random-theme mode wins over a configured worktreeTheme so users
+    // can opt into per-pane variety without clearing their saved selection.
+    // Orchestrator theme is always the fixed `rootTheme` regardless.
+    let resolvedScheme: any = null
+    if (!isRoot && this.profile.worktreeThemeRandom && this.deps.randomTheme) {
+      resolvedScheme = await this.deps.randomTheme()
+    } else {
+      const themeName = isRoot ? this.profile.rootTheme : this.profile.worktreeTheme
+      resolvedScheme = this.deps.resolveTheme ? await this.deps.resolveTheme(themeName) : null
+    }
     const clonedProfile: any = {
       ...localProfile,
       id: `agent-fleet:${isRoot ? 'root' : 'wt'}:${this.paneRegistry.size}`,

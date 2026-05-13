@@ -161,14 +161,26 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
                 <li ngbNavItem>
                   <a ngbNavLink>Worker</a>
                   <ng-template ngbNavContent>
-                    <div class="theme-grid">
+                    <div class="form-check mb-3">
+                      <input class="form-check-input" type="checkbox" id="fleet-worker-theme-random"
+                             [(ngModel)]="profile.options.worktreeThemeRandom" />
+                      <label class="form-check-label" for="fleet-worker-theme-random">
+                        Random — each worker pane gets a random theme on spawn
+                      </label>
+                      <small class="form-text text-muted">
+                        Overrides the selection below. The orchestrator pane still uses its fixed theme.
+                      </small>
+                    </div>
+                    <div class="theme-grid" [class.disabled-grid]="profile.options.worktreeThemeRandom">
                       <button type="button" class="theme-card" [class.active]="profile.options.worktreeTheme === null"
+                              [disabled]="profile.options.worktreeThemeRandom"
                               (click)="profile.options.worktreeTheme = null">
                         <div class="theme-preview default"><span>default</span></div>
                         <div class="theme-name">(Tabby default)</div>
                       </button>
                       <button type="button" class="theme-card" *ngFor="let t of colorSchemes"
                               [class.active]="profile.options.worktreeTheme === t.name"
+                              [disabled]="profile.options.worktreeThemeRandom"
                               (click)="profile.options.worktreeTheme = t.name">
                         <div class="theme-preview" [style.background]="t.background || '#000'" [style.color]="t.foreground || '#fff'">
                           <div class="sample-line"><span class="prompt" [style.color]="(t.colors || [])[2]">$</span> ls -la</div>
@@ -223,6 +235,7 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
       gap: 0.75rem;
       margin-top: 0.25rem;
     }
+    :host .theme-grid.disabled-grid { opacity: 0.4; pointer-events: none; }
     :host .theme-card {
       background: transparent;
       border: 1px solid rgba(255, 255, 255, 0.15);

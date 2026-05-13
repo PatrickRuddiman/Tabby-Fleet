@@ -27,6 +27,10 @@ export interface AgentFleetProfileOptions {
   // Themes (Tabby terminal color scheme names)
   rootTheme: string | null
   worktreeTheme: string | null
+  // When true, each new worker pane picks a random color scheme from the
+  // installed set instead of using `worktreeTheme`. The orchestrator pane
+  // is unaffected.
+  worktreeThemeRandom: boolean
   // Layout
   zoomFactor: number
   minPaneWidth: number
@@ -99,6 +103,7 @@ export const DEFAULT_PROFILE_OPTIONS: AgentFleetProfileOptions = {
   paneTitlePattern: '{branch_short}',
   rootTheme: null,
   worktreeTheme: null,
+  worktreeThemeRandom: false,
   zoomFactor: 2.0,
   minPaneWidth: 120,
   minPaneHeight: 80,
