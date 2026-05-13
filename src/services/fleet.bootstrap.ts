@@ -46,9 +46,16 @@ export class FleetBootstrap {
         tabsService: this.tabsService,
         profilesService,
         resolveTheme: (name: string | null) => this.resolveTheme(name),
+        randomTheme: () => this.randomTheme(),
       })
       void controller.launch()
     }, 0)
+  }
+
+  private async randomTheme(): Promise<TerminalColorScheme | null> {
+    const schemes = await this.getSchemes()
+    if (schemes.length === 0) return null
+    return schemes[Math.floor(Math.random() * schemes.length)]
   }
 
   private async getSchemes(): Promise<TerminalColorScheme[]> {

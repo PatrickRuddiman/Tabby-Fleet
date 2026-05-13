@@ -10,8 +10,16 @@ import {
 
 describe('api', () => {
   describe('DEFAULT_PROFILE_OPTIONS', () => {
-    it('has exactly 21 keys', () => {
-      assert.equal(Object.keys(DEFAULT_PROFILE_OPTIONS).length, 21)
+    it('has exactly 23 keys', () => {
+      assert.equal(Object.keys(DEFAULT_PROFILE_OPTIONS).length, 23)
+    })
+
+    it('orchestratorShellOnly defaults to false', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.orchestratorShellOnly, false)
+    })
+
+    it('worktreeThemeRandom defaults to false', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.worktreeThemeRandom, false)
     })
 
     it('agentCommand default is empty (user supplies their agent)', () => {

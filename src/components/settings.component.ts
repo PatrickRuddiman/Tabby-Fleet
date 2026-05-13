@@ -64,10 +64,25 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
                   </button>
                 </div>
                 <ng-container *ngIf="showAdvanced">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="fleet-orch-shell-only"
+                           [(ngModel)]="profile.options.orchestratorShellOnly" />
+                    <label class="form-check-label" for="fleet-orch-shell-only">
+                      Orchestrator: shell only (skip the agent in the orchestrator pane)
+                    </label>
+                    <small class="form-text text-muted">
+                      Leaves the orchestrator pane as a bare shell at the repo root —
+                      for manually driving <code>git worktree add/remove</code>.
+                      Worker panes still run the agent.
+                    </small>
+                  </div>
                   <div class="form-group">
                     <label>Orchestrator command</label>
-                    <input class="form-control" type="text" [(ngModel)]="profile.options.rootCommandTemplate" placeholder="leave blank to use Worker command" />
-                    <small class="form-text text-muted">Override for the orchestrator pane (cwd = repo path). Blank = same as Worker command.</small>
+                    <input class="form-control" type="text"
+                           [(ngModel)]="profile.options.rootCommandTemplate"
+                           [disabled]="profile.options.orchestratorShellOnly"
+                           placeholder="leave blank to use Worker command" />
+                    <small class="form-text text-muted">Override for the orchestrator pane (cwd = repo path). Blank = same as Worker command. Ignored when "shell only" is checked.</small>
                   </div>
                   <div class="form-group">
                     <label>Orchestrator title</label>
@@ -146,14 +161,26 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
                 <li ngbNavItem>
                   <a ngbNavLink>Worker</a>
                   <ng-template ngbNavContent>
-                    <div class="theme-grid">
+                    <div class="form-check mb-3">
+                      <input class="form-check-input" type="checkbox" id="fleet-worker-theme-random"
+                             [(ngModel)]="profile.options.worktreeThemeRandom" />
+                      <label class="form-check-label" for="fleet-worker-theme-random">
+                        Random — each worker pane gets a random theme on spawn
+                      </label>
+                      <small class="form-text text-muted">
+                        Overrides the selection below. The orchestrator pane still uses its fixed theme.
+                      </small>
+                    </div>
+                    <div class="theme-grid" [class.disabled-grid]="profile.options.worktreeThemeRandom">
                       <button type="button" class="theme-card" [class.active]="profile.options.worktreeTheme === null"
+                              [disabled]="profile.options.worktreeThemeRandom"
                               (click)="profile.options.worktreeTheme = null">
                         <div class="theme-preview default"><span>default</span></div>
                         <div class="theme-name">(Tabby default)</div>
                       </button>
                       <button type="button" class="theme-card" *ngFor="let t of colorSchemes"
                               [class.active]="profile.options.worktreeTheme === t.name"
+                              [disabled]="profile.options.worktreeThemeRandom"
                               (click)="profile.options.worktreeTheme = t.name">
                         <div class="theme-preview" [style.background]="t.background || '#000'" [style.color]="t.foreground || '#fff'">
                           <div class="sample-line"><span class="prompt" [style.color]="(t.colors || [])[2]">$</span> ls -la</div>
@@ -208,6 +235,7 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
       gap: 0.75rem;
       margin-top: 0.25rem;
     }
+    :host .theme-grid.disabled-grid { opacity: 0.4; pointer-events: none; }
     :host .theme-card {
       background: transparent;
       border: 1px solid rgba(255, 255, 255, 0.15);
