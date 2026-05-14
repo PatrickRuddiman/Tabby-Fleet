@@ -1,6 +1,6 @@
 {
   "name": "tabby-fleet",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Tabby Terminal plugin: one tab per git repo, one agent pane per worktree, focus-zoom grid layout.",
   "keywords": [
     "tabby-plugin",

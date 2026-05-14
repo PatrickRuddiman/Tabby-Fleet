@@ -5,6 +5,7 @@ const { Subject } = require('rxjs')
 
 class ProfileProvider {}
 class TabRecoveryProvider {}
+class CLIHandler {}
 class TabbyCoreModule {}
 
 class FakeClassList {
@@ -102,6 +103,7 @@ module.exports = {
   default: TabbyCoreModule,
   ProfileProvider,
   TabRecoveryProvider,
+  CLIHandler,
   TabbyCoreModule,
   SplitTabComponent,
   SplitContainer,
