@@ -10,8 +10,13 @@ import {
 
 describe('api', () => {
   describe('DEFAULT_PROFILE_OPTIONS', () => {
-    it('has exactly 23 keys', () => {
-      assert.equal(Object.keys(DEFAULT_PROFILE_OPTIONS).length, 23)
+    it('has exactly 25 keys', () => {
+      assert.equal(Object.keys(DEFAULT_PROFILE_OPTIONS).length, 25)
+    })
+
+    it('layout grid defaults to 3 cols × 2 rows', () => {
+      assert.equal(DEFAULT_PROFILE_OPTIONS.maxCols, 3)
+      assert.equal(DEFAULT_PROFILE_OPTIONS.maxRows, 2)
     })
 
     it('orchestratorShellOnly defaults to false', () => {

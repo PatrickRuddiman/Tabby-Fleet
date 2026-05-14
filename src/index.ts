@@ -16,6 +16,7 @@ import { AgentFleetProfileSettingsComponent } from './components/settings.compon
 import { AgentFleetDefaultsTabComponent } from './components/defaults-tab.component'
 import { ConfirmFleetCloseModalComponent } from './components/confirm-fleet-close-modal.component'
 import { FleetDeadPaneOverlayComponent } from './components/fleet-dead-pane-overlay.component'
+import { FleetWorktreeDrawerComponent } from './components/fleet-worktree-drawer.component'
 
 export const AGENT_FLEET_MODULE_CONFIG = {
   imports: [
@@ -29,6 +30,7 @@ export const AGENT_FLEET_MODULE_CONFIG = {
     AgentFleetDefaultsTabComponent,
     ConfirmFleetCloseModalComponent,
     FleetDeadPaneOverlayComponent,
+    FleetWorktreeDrawerComponent,
   ],
   providers: [
     { provide: ProfileProvider, useClass: AgentFleetProfileProvider, multi: true },

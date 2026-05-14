@@ -36,6 +36,11 @@ export interface AgentFleetProfileOptions {
   minPaneWidth: number
   minPaneHeight: number
   zoomTransitionMs: number
+  // Grid shape ceiling. The visible grid is at most maxCols × maxRows cells
+  // (1 orchestrator + workers). Any worktree beyond that count is parked in
+  // the mosaic overlay. Default 3×2 = 6 cells.
+  maxCols: number
+  maxRows: number
   // Watcher
   autoOpenNew: boolean
   autoCloseRemoved: boolean
@@ -108,6 +113,8 @@ export const DEFAULT_PROFILE_OPTIONS: AgentFleetProfileOptions = {
   minPaneWidth: 120,
   minPaneHeight: 80,
   zoomTransitionMs: 150,
+  maxCols: 3,
+  maxRows: 2,
   autoOpenNew: true,
   autoCloseRemoved: true,
   stealFocusOnAdd: false,

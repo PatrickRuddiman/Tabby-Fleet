@@ -24,7 +24,7 @@ describe('AgentFleetModule (smoke)', () => {
     assert.equal(AGENT_FLEET_MODULE_CONFIG.imports.length, 4)
   })
 
-  it('declares the four fleet components', () => {
-    assert.equal(AGENT_FLEET_MODULE_CONFIG.declarations.length, 4)
+  it('declares the five fleet components', () => {
+    assert.equal(AGENT_FLEET_MODULE_CONFIG.declarations.length, 5)
   })
 })
