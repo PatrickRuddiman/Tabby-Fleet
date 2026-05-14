@@ -48,12 +48,17 @@ class SplitTabComponent {
     this.destroyed$ = new Subject()
     this.initialized$ = new Subject()
     this.tabRemoved$ = new Subject()
-    this.elementRef = {
-      nativeElement: {
-        classList: new FakeClassList(),
-        style: new FakeStyle(),
-      },
+    const fakeHost = {
+      classList: new FakeClassList(),
+      style: new FakeStyle(),
+      appendChild: () => {},
+      removeChild: () => {},
     }
+    this.elementRef = { nativeElement: fakeHost }
+    // Real Tabby exposes the host element via viewContainerEmbeddedRef once
+    // the tab is inserted into its container, NOT via elementRef. Mirror that
+    // so production code paths can find the host.
+    this.viewContainerEmbeddedRef = { rootNodes: [fakeHost] }
     this.root = new SplitContainer('h', [])
   }
   async add(tab, relative, side) {

@@ -12,6 +12,8 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
   minPaneWidth: { min: 40, max: 4000 },
   minPaneHeight: { min: 40, max: 4000 },
   zoomTransitionMs: { min: 0, max: 1000 },
+  maxCols: { min: 1, max: 8 },
+  maxRows: { min: 1, max: 6 },
 }
 
 /**
@@ -109,6 +111,29 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
                   <input class="form-check-input" type="checkbox" id="fleet-inc-locked" [(ngModel)]="profile.options.includeLocked" />
                   <label class="form-check-label" for="fleet-inc-locked">Include locked worktrees</label>
                 </div>
+              </fieldset>
+
+              <fieldset class="fleet-section">
+                <legend>Layout</legend>
+                <div class="form-row layout-grid">
+                  <div class="form-group">
+                    <label>Max columns</label>
+                    <input class="form-control" type="number" min="1" max="8" step="1"
+                           [(ngModel)]="profile.options.maxCols"
+                           (blur)="clampField('maxCols')" />
+                  </div>
+                  <div class="form-group">
+                    <label>Max rows</label>
+                    <input class="form-control" type="number" min="1" max="6" step="1"
+                           [(ngModel)]="profile.options.maxRows"
+                           (blur)="clampField('maxRows')" />
+                  </div>
+                </div>
+                <small class="form-text text-muted">
+                  Visible grid is at most <strong>{{ paneCapPreview() }}</strong> panes
+                  ({{ profile.options.maxCols }}&times;{{ profile.options.maxRows }}).
+                  Any extra worktrees appear in the mosaic. Default 3&times;2.
+                </small>
               </fieldset>
 
               <fieldset class="fleet-section">
@@ -220,6 +245,12 @@ const BOUNDS: Partial<Record<keyof AgentFleetProfileOptions, NumericBounds>> = {
       font-size: 0.95em;
       width: auto;
     }
+    :host .form-row.layout-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+    :host .form-row.layout-grid .form-group { margin-bottom: 0; }
     :host .form-group { margin-bottom: 0.75rem; }
     :host .form-group label { display: block; margin-bottom: 0.25rem; font-weight: 500; }
     :host .form-group small.form-text { display: block; margin-top: 0.25rem; opacity: 0.7; font-size: 0.85em; }
@@ -345,6 +376,14 @@ export class AgentFleetProfileSettingsComponent implements OnInit {
     const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : bounds.min
     const clamped = Math.min(bounds.max, Math.max(bounds.min, value))
     ;(opts as any)[name] = clamped
+  }
+
+  /** Render-side helper: cells in the visible grid given current cols/rows. */
+  paneCapPreview(): number {
+    const opts = this.ensureOptions()
+    const c = Math.max(1, Number(opts.maxCols) || 1)
+    const r = Math.max(1, Number(opts.maxRows) || 1)
+    return c * r
   }
 
 }

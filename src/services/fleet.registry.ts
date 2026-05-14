@@ -1,6 +1,6 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { Injectable } from '@angular/core'
+import { ApplicationRef, EnvironmentInjector, Injectable, Injector, createComponent } from '@angular/core'
 import { Subscription } from 'rxjs'
 import { NotificationsService, ProfilesService, SplitContainer, SplitTabComponent, TabsService } from 'tabby-core'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
@@ -21,6 +21,7 @@ import { RepoInfo, worktreeToVars } from '../utils/vars'
 import { WorktreeWatcher } from './watcher.service'
 import { ConfirmFleetCloseModalComponent } from '../components/confirm-fleet-close-modal.component'
 import { FleetDeadPaneOverlayComponent } from '../components/fleet-dead-pane-overlay.component'
+import { DrawerItem, FleetWorktreeDrawerComponent } from '../components/fleet-worktree-drawer.component'
 
 const execAsync = promisify(exec)
 
@@ -31,6 +32,9 @@ export interface FleetControllerDeps {
   profilesService?: ProfilesService
   resolveTheme?: (name: string | null) => Promise<any | null>
   randomTheme?: () => Promise<any | null>
+  applicationRef?: ApplicationRef
+  environmentInjector?: EnvironmentInjector
+  injector?: Injector
 }
 
 interface PaneEntry {
@@ -46,6 +50,17 @@ interface PaneEntry {
   baselineWeight: number
   overlayRef?: any
   destroySub?: Subscription
+  visible?: boolean
+  mosaicHost?: boolean
+  worktree?: Worktree
+  userClosing?: boolean
+}
+
+interface ExitedEntry {
+  worktreePath: string
+  title: string
+  branch: string | null
+  worktree: Worktree
 }
 
 /**
@@ -60,6 +75,8 @@ export class FleetController {
   repoInfo: RepoInfo | null = null
   private subscriptions: Subscription[] = []
   private resizeObserver: any = null
+  private drawerRef: any = null
+  readonly exitedWorktrees = new Map<string, ExitedEntry>()
 
   constructor(
     readonly splitTab: SplitTabComponent,
@@ -68,13 +85,57 @@ export class FleetController {
     readonly deps: FleetControllerDeps = {},
   ) {}
 
+  /** Configured grid columns, clamped to [1,8]. Defaults to 3 if unset. */
+  private get maxCols(): number {
+    return Math.min(8, Math.max(1, Math.floor(this.profile.maxCols || 3)))
+  }
+  /** Configured grid rows, clamped to [1,6]. Defaults to 2 if unset. */
+  private get maxRows(): number {
+    return Math.min(6, Math.max(1, Math.floor(this.profile.maxRows || 2)))
+  }
+  /** Total visible cells = maxCols × maxRows. */
+  private get maxVisible(): number {
+    return this.maxCols * this.maxRows
+  }
+
+  /**
+   * Return the actual `<split-tab>` DOM host element. `BaseTabComponent`
+   * doesn't expose `elementRef`; the host element only appears after Tabby
+   * inserts the tab into its app container (via `viewContainerEmbeddedRef`)
+   * or via the `hostView`'s root nodes. Fall back to a pane's parentElement
+   * if neither is wired yet.
+   */
+  private hostElement(): HTMLElement | undefined {
+    const tab: any = this.splitTab
+    const fromEmbedded: HTMLElement | undefined = tab?.viewContainerEmbeddedRef?.rootNodes?.[0]
+    if (fromEmbedded && typeof fromEmbedded.appendChild === 'function') return fromEmbedded
+    const fromHostView: HTMLElement | undefined = tab?.hostView?.rootNodes?.[0]
+    if (fromHostView && typeof fromHostView.appendChild === 'function') return fromHostView
+    for (const entry of this.paneRegistry.values()) {
+      const paneEl: HTMLElement | undefined = tab?.viewRefs?.get(entry.pane)?.rootNodes?.[0]
+      const parent = paneEl?.parentElement as HTMLElement | null | undefined
+      if (parent && typeof parent.appendChild === 'function') return parent
+    }
+    return undefined
+  }
+
   attach(): void {
     // Mark the SplitTabComponent host so the CSS transition rule (task 011)
     // scopes correctly and write the developer-configured transition duration.
-    const el: any = (this.splitTab as any).elementRef?.nativeElement
-    if (el?.classList?.add) el.classList.add('fleet-tab')
-    if (el?.style?.setProperty) {
-      el.style.setProperty('--fleet-zoom-duration', `${this.profile.zoomTransitionMs}ms`)
+    // BaseTabComponent doesn't expose ElementRef directly; the host element is
+    // accessible via viewContainerEmbeddedRef once Tabby has inserted the tab.
+    // At attach() time it may not be ready yet — retry on the next frame.
+    const applyHostStyles = () => {
+      const el = this.hostElement()
+      if (!el) return false
+      if (!el.classList.contains('fleet-tab')) el.classList.add('fleet-tab')
+      if (el.style?.setProperty) {
+        el.style.setProperty('--fleet-zoom-duration', `${this.profile.zoomTransitionMs}ms`)
+      }
+      return true
+    }
+    if (!applyHostStyles()) {
+      setTimeout(applyHostStyles, 0)
     }
 
     // Re-zoom on pane focus change inside the fleet tab.
@@ -87,10 +148,17 @@ export class FleetController {
 
     // Re-zoom on container resize so min-floor (px) holds across window resizes.
     const Resize = (globalThis as any).ResizeObserver
-    if (Resize && el) {
+    const attachResizeObserver = () => {
+      if (!Resize || this.resizeObserver) return
+      const host = this.hostElement()
+      if (!host) {
+        setTimeout(attachResizeObserver, 100)
+        return
+      }
       this.resizeObserver = new Resize(() => this.recompute())
-      this.resizeObserver.observe(el)
+      this.resizeObserver.observe(host)
     }
+    attachResizeObserver()
 
     // Tear down when Tabby destroys the tab.
     const destroyed$: any = (this.splitTab as any).destroyed$
@@ -103,7 +171,7 @@ export class FleetController {
   }
 
   detach(): void {
-    const el: any = (this.splitTab as any).elementRef?.nativeElement
+    const el = this.hostElement()
     if (el?.classList?.remove) el.classList.remove('fleet-tab')
     this.subscriptions.forEach(s => s.unsubscribe())
     this.subscriptions = []
@@ -119,6 +187,8 @@ export class FleetController {
     }
     this.paneRegistry.clear()
     this.userDismissed.clear()
+    this.exitedWorktrees.clear()
+    this.destroyDrawer()
   }
 
   /**
@@ -138,20 +208,49 @@ export class FleetController {
    */
   rebuildGrid(focusedPane: any = null): void {
     const entries = [...this.paneRegistry.values()]
-    if (entries.length === 0) return
-
-    const N = entries.length
-    const cols = Math.ceil(Math.sqrt(N))
-    const rows = Math.ceil(N / cols)
-    const zoom = Math.max(1, this.profile.zoomFactor || 1)
-
-    // Partition panes into rows (row-major).
-    const rowGroups: PaneEntry[][] = []
-    for (let r = 0; r < rows; r++) {
-      rowGroups.push(entries.slice(r * cols, (r + 1) * cols))
+    if (entries.length === 0) {
+      this.destroyDrawer()
+      return
     }
 
-    // Locate focused pane in the grid.
+    // Reset flags; recomputed below.
+    for (const e of entries) { e.visible = true; e.mosaicHost = false }
+
+    // Partition into visible grid + hidden overflow when over the cap.
+    // Slot 1 = orchestrator. Slots 2..maxVisible = workers[0..maxVisible-2].
+    // Beyond maxVisible the worker panes stay mounted at ratio 0 so PTYs and
+    // scrollback survive; they appear in the Worktree Drawer as inactive
+    // cards and can be swapped back into slot maxVisible on click.
+    let activeEntries: PaneEntry[] = entries
+    let hiddenEntries: PaneEntry[] = []
+    let forceShape = false
+
+    if (entries.length > this.maxVisible) {
+      const orchestrator = entries.find(e => e.role === 'root') ?? entries[0]
+      const workers = entries.filter(e => e !== orchestrator)
+      const activeWorkers = workers.slice(0, this.maxVisible - 1)
+      const overflow = workers.slice(this.maxVisible - 1)
+      activeEntries = [orchestrator, ...activeWorkers]
+      hiddenEntries = overflow
+      for (const e of hiddenEntries) e.visible = false
+      forceShape = true
+    }
+
+    const N = activeEntries.length
+    // When at the cap (overflow path) the grid shape is the user-configured
+    // maxCols × maxRows. Below the cap the grid scales naturally so smaller
+    // fleets still look like a sensible square-ish arrangement.
+    const cols = forceShape ? this.maxCols : Math.ceil(Math.sqrt(N))
+    const rows = forceShape ? this.maxRows : Math.ceil(N / cols)
+    const zoom = Math.max(1, this.profile.zoomFactor || 1)
+
+    // Partition active panes into rows (row-major).
+    const rowGroups: PaneEntry[][] = []
+    for (let r = 0; r < rows; r++) {
+      rowGroups.push(activeEntries.slice(r * cols, (r + 1) * cols))
+    }
+
+    // Locate focused pane in the grid (only honoured when visible).
     let focusedRow = -1
     let focusedCol = -1
     if (focusedPane) {
@@ -192,9 +291,171 @@ export class FleetController {
       }
     }
 
+    // Park hidden panes as ratio-0 siblings of the visible rows so Tabby
+    // keeps their viewRefs mounted (PTYs stay alive, scrollback survives).
+    for (const e of hiddenEntries) {
+      outer.children.push(e.pane)
+      outer.ratios.push(0)
+    }
+
     const splitTabAny = this.splitTab as any
     splitTabAny.root = outer
     if (typeof splitTabAny.layout === 'function') splitTabAny.layout()
+
+    this.syncDrawer(activeEntries, hiddenEntries)
+  }
+
+  /**
+   * Build the Active / Inactive item lists for the drawer and ensure the
+   * drawer component is mounted on the fleet tab's root element. The drawer
+   * is always present once the fleet has any pane; it just sits collapsed as
+   * a chevron strip until the user opens it.
+   */
+  private syncDrawer(activeEntries: PaneEntry[], hiddenEntries: PaneEntry[]): void {
+    const activeItems: DrawerItem[] = activeEntries.map(e => ({
+      key: e.paneId,
+      title: e.title,
+      branch: e.branch,
+      kind: 'alive-active' as const,
+    }))
+    const parkedItems: DrawerItem[] = hiddenEntries.map(e => ({
+      key: e.paneId,
+      title: e.title,
+      branch: e.branch,
+      kind: 'alive-parked' as const,
+    }))
+    const exitedItems: DrawerItem[] = [...this.exitedWorktrees.values()].map(e => ({
+      key: e.worktreePath,
+      title: e.title,
+      branch: e.branch,
+      kind: 'exited' as const,
+    }))
+    const inactiveItems = [...parkedItems, ...exitedItems]
+
+    const mountEl = this.hostElement()
+    if (!mountEl) {
+      // Host element not ready yet — Tabby hasn't inserted the splitTab into
+      // its container. Try again on the next tick.
+      setTimeout(() => this.rebuildGrid(), 0)
+      return
+    }
+
+    if (this.drawerRef) {
+      const instance = this.drawerRef.instance
+      instance.activeItems = activeItems
+      instance.inactiveItems = inactiveItems
+      instance.onSelect = (item: DrawerItem) => this.onDrawerClick(item)
+      try { this.drawerRef.changeDetectorRef?.detectChanges() } catch { /* noop */ }
+      const node: HTMLElement = this.drawerRef.location.nativeElement
+      if (node.parentElement !== mountEl) mountEl.appendChild(node)
+      return
+    }
+
+    const envInjector = this.deps.environmentInjector
+    const appRef = this.deps.applicationRef
+    if (!envInjector || !appRef) return
+
+    const ref = createComponent(FleetWorktreeDrawerComponent, {
+      environmentInjector: envInjector,
+      elementInjector: this.deps.injector,
+    })
+    ref.instance.activeItems = activeItems
+    ref.instance.inactiveItems = inactiveItems
+    ref.instance.onSelect = (item: DrawerItem) => this.onDrawerClick(item)
+    appRef.attachView(ref.hostView)
+    try { ref.changeDetectorRef.detectChanges() } catch { /* noop */ }
+    mountEl.appendChild(ref.location.nativeElement)
+    this.drawerRef = ref
+  }
+
+  private destroyDrawer(): void {
+    if (!this.drawerRef) return
+    const ref = this.drawerRef
+    try {
+      const node: HTMLElement | undefined = ref.location?.nativeElement
+      if (node?.parentElement) node.parentElement.removeChild(node)
+    } catch { /* noop */ }
+    try { this.deps.applicationRef?.detachView(ref.hostView) } catch { /* noop */ }
+    try { ref.destroy?.() } catch { /* noop */ }
+    this.drawerRef = null
+  }
+
+  /**
+   * Drawer card click dispatcher:
+   *   - alive-active   → focus that pane in the grid
+   *   - alive-parked   → swap into slot maxVisible (last visible slot),
+   *                      displacing whatever was there into the parked pool
+   *   - exited         → spawn a fresh pane for the worktree
+   */
+  onDrawerClick(item: DrawerItem): void {
+    if (item.kind === 'alive-active') {
+      const entry = this.paneRegistry.get(item.key)
+      if (entry) {
+        try { (this.splitTab as any).focus?.(entry.pane) } catch { /* noop */ }
+      }
+      return
+    }
+    if (item.kind === 'alive-parked') {
+      this.bringIntoLastSlot(item.key)
+      return
+    }
+    if (item.kind === 'exited') {
+      void this.relaunchExited(item.key)
+      return
+    }
+  }
+
+  /**
+   * Spawn a fresh worker pane for a previously-exited worktree. Appended to
+   * the end of the registry; if total panes pushes past maxVisible the
+   * extras spill into the drawer's Inactive section on the next rebuildGrid.
+   */
+  async relaunchExited(worktreePath: string): Promise<void> {
+    const exited = this.exitedWorktrees.get(worktreePath)
+    if (!exited || !this.repoInfo) return
+    // addPaneForWorktree clears both maps on its own, but delete preemptively
+    // so the drawer doesn't briefly show the about-to-launch card.
+    this.exitedWorktrees.delete(worktreePath)
+    this.userDismissed.delete(worktreePath)
+    try {
+      await this.addPaneForWorktree(exited.worktree, this.repoInfo)
+    } catch (err: any) {
+      // Put it back so the user can try again.
+      this.exitedWorktrees.set(worktreePath, exited)
+      this.notify('error', `Failed to relaunch ${exited.title}`, String(err?.message ?? err))
+      this.rebuildGrid()
+    }
+  }
+
+  /**
+   * Swap the promoted parked worker into slot maxVisible (last visible cell),
+   * displacing slot maxVisible's current occupant into the parked pool.
+   * Orchestrator (slot 1) is never touched.
+   *
+   * No tab is added or removed; PTYs survive. Map insertion order = grid order.
+   */
+  bringIntoLastSlot(promotedPaneId: string): void {
+    const promoted = this.paneRegistry.get(promotedPaneId)
+    if (!promoted || promoted.role !== 'worktree') return
+    const all = [...this.paneRegistry.values()]
+    const orchestrator = all.find(e => e.role === 'root')
+    if (!orchestrator) return
+    const workers = all.filter(e => e !== orchestrator)
+    // workers[0..maxVisible-2] fill slots 2..maxVisible. Last visible worker
+    // slot = workers[maxVisible - 2].
+    const lastSlotIndex = this.maxVisible - 2
+    const displaced = workers[lastSlotIndex]
+    if (!displaced || displaced.paneId === promotedPaneId) return
+    const visibleWorkers = workers.slice(0, lastSlotIndex).filter(e => e !== promoted)
+    const rest = workers.filter(e => e !== promoted && e !== displaced && !visibleWorkers.includes(e))
+    const newWorkers = [...visibleWorkers, promoted, ...rest, displaced]
+
+    this.paneRegistry.clear()
+    this.paneRegistry.set(orchestrator.paneId, orchestrator)
+    for (const w of newWorkers) this.paneRegistry.set(w.paneId, w)
+
+    this.rebuildGrid(promoted.pane)
+    try { (this.splitTab as any).focus?.(promoted.pane) } catch { /* noop */ }
   }
 
   /**
@@ -254,6 +515,12 @@ export class FleetController {
       name: title,
       isBuiltin: false,
       isTemplate: false,
+      // Force tabby-terminal to destroy worker panes when their session ends
+      // (agent process exits → shell exits → PTY closes). Without this the
+      // user's default behaviorOnSessionEnd (typically 'auto') leaves the
+      // pane lingering. Orchestrator inherits the user default so a manual
+      // `exit` doesn't surprise-close the fleet.
+      ...(isRoot ? {} : { behaviorOnSessionEnd: 'close' as const }),
       // Tabby's TerminalTab reads profile.terminalColorScheme (top-level, not
       // inside options) for the active scheme. Resolved scheme object — not a
       // { name } stub — is what `configureColors` consumes.
@@ -295,14 +562,30 @@ export class FleetController {
       color,
       recovered: false,
       baselineWeight: isRoot ? 2 : 1,
+      worktree: wt,
     }
     this.paneRegistry.set(paneId, entry)
+    // Re-launch wins over a prior dismiss / exit; the pane is alive again.
+    this.userDismissed.delete(wt.path)
+    this.exitedWorktrees.delete(wt.path)
 
     if (!isRoot) {
       const destroyed$: any = tab.destroyed$ ?? tab.closed$
       if (destroyed$ && typeof destroyed$.subscribe === 'function') {
         entry.destroySub = destroyed$.subscribe(() => {
-          this.userDismissed.add(entry.worktreePath)
+          if (entry.userClosing) {
+            // User clicked X / closed the tab → permanent dismiss.
+            this.userDismissed.add(entry.worktreePath)
+          } else if (entry.worktree) {
+            // Agent process exited on its own → keep the worktree available
+            // for relaunch via the mosaic.
+            this.exitedWorktrees.set(entry.worktreePath, {
+              worktreePath: entry.worktreePath,
+              title: entry.title,
+              branch: entry.branch,
+              worktree: entry.worktree,
+            })
+          }
           this.paneRegistry.delete(entry.paneId)
           this.rebuildGrid()
         })
@@ -321,6 +604,9 @@ export class FleetController {
     const tabAny: any = tab
     if (typeof tabAny.canClose === 'function' && !tabAny.__fleetCanCloseWrapped) {
       tabAny.canClose = async () => {
+        // Flag this pane as user-dismissed before tear-down so the destroyed$
+        // subscription routes it to userDismissed instead of the exited queue.
+        entry.userClosing = true
         await this.killPaneChildren(tab)
         return true
       }
@@ -511,6 +797,15 @@ export class FleetController {
         this.notify('info', `Worktree closed: ${entry?.title ?? path}`)
       }
       changed = true
+    }
+
+    // A worktree gone from `git worktree list` can no longer be relaunched —
+    // drop any stale exited entries so the mosaic stays accurate.
+    for (const path of [...this.exitedWorktrees.keys()]) {
+      if (!incoming.has(path)) {
+        this.exitedWorktrees.delete(path)
+        changed = true
+      }
     }
 
     if (changed) {

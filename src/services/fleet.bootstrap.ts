@@ -1,4 +1,4 @@
-import { Injectable, Injector } from '@angular/core'
+import { ApplicationRef, EnvironmentInjector, Injectable, Injector } from '@angular/core'
 import { AppService, NotificationsService, ProfilesService, SplitTabComponent, TabsService } from 'tabby-core'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import { TerminalColorScheme, TerminalColorSchemeProvider } from 'tabby-terminal'
@@ -29,6 +29,8 @@ export class FleetBootstrap {
     private readonly notifications: NotificationsService,
     private readonly modal: NgbModal,
     private readonly injector: Injector,
+    private readonly applicationRef: ApplicationRef,
+    private readonly environmentInjector: EnvironmentInjector,
   ) {
     this.app.tabOpened$.subscribe((tab: any) => this.onTabOpened(tab))
   }
@@ -47,6 +49,9 @@ export class FleetBootstrap {
         profilesService,
         resolveTheme: (name: string | null) => this.resolveTheme(name),
         randomTheme: () => this.randomTheme(),
+        applicationRef: this.applicationRef,
+        environmentInjector: this.environmentInjector,
+        injector: this.injector,
       })
       void controller.launch()
     }, 0)
