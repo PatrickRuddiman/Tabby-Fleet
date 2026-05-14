@@ -76,6 +76,7 @@ export class FleetController {
   private subscriptions: Subscription[] = []
   private resizeObserver: any = null
   private drawerRef: any = null
+  private dragOverlays: HTMLElement[] = []
   readonly exitedWorktrees = new Map<string, ExitedEntry>()
 
   constructor(
@@ -188,6 +189,7 @@ export class FleetController {
     this.paneRegistry.clear()
     this.userDismissed.clear()
     this.exitedWorktrees.clear()
+    this.endDrag()
     this.destroyDrawer()
   }
 
@@ -207,6 +209,9 @@ export class FleetController {
    * stay alive across rebuilds.
    */
   rebuildGrid(focusedPane: any = null): void {
+    // Any in-flight drag is anchored to specific pane DOMs that we're about
+    // to reposition — cancel it cleanly so we don't leave stale overlays.
+    if (this.dragOverlays.length > 0) this.endDrag()
     const entries = [...this.paneRegistry.values()]
     if (entries.length === 0) {
       this.destroyDrawer()
@@ -345,6 +350,10 @@ export class FleetController {
       instance.activeItems = activeItems
       instance.inactiveItems = inactiveItems
       instance.onSelect = (item: DrawerItem) => this.onDrawerClick(item)
+      instance.onDragStart = (item: DrawerItem) => this.beginDrag(item)
+      instance.onDragEnd = () => this.endDrag()
+      instance.onDrop = (source: DrawerItem, target: DrawerItem) =>
+        this.handleDrop(source, { kind: 'drawer', item: target })
       try { this.drawerRef.changeDetectorRef?.detectChanges() } catch { /* noop */ }
       const node: HTMLElement = this.drawerRef.location.nativeElement
       if (node.parentElement !== mountEl) mountEl.appendChild(node)
@@ -362,6 +371,10 @@ export class FleetController {
     ref.instance.activeItems = activeItems
     ref.instance.inactiveItems = inactiveItems
     ref.instance.onSelect = (item: DrawerItem) => this.onDrawerClick(item)
+    ref.instance.onDragStart = (item: DrawerItem) => this.beginDrag(item)
+    ref.instance.onDragEnd = () => this.endDrag()
+    ref.instance.onDrop = (source: DrawerItem, target: DrawerItem) =>
+      this.handleDrop(source, { kind: 'drawer', item: target })
     appRef.attachView(ref.hostView)
     try { ref.changeDetectorRef.detectChanges() } catch { /* noop */ }
     mountEl.appendChild(ref.location.nativeElement)
@@ -456,6 +469,130 @@ export class FleetController {
 
     this.rebuildGrid(promoted.pane)
     try { (this.splitTab as any).focus?.(promoted.pane) } catch { /* noop */ }
+  }
+
+  /**
+   * Drag-and-drop: paint transparent overlay divs over each visible grid pane
+   * (except the drag source if it happens to be visible) so the panes act as
+   * drop targets. Native dragover/drop handlers attached directly — no Angular
+   * machinery so we can drop anywhere without re-rendering the grid.
+   */
+  beginDrag(source: DrawerItem): void {
+    this.endDrag()
+    this.ensureDropHotStyles()
+    const splitTabAny = this.splitTab as any
+    for (const entry of this.paneRegistry.values()) {
+      if (!entry.visible) continue
+      if (entry.paneId === source.key && source.kind === 'alive-active') continue
+      const paneEl: HTMLElement | undefined = splitTabAny.viewRefs?.get(entry.pane)?.rootNodes?.[0]
+      if (!paneEl) continue
+      const overlay = document.createElement('div')
+      overlay.dataset.fleetTargetPaneId = entry.paneId
+      overlay.style.cssText = 'position:absolute;inset:0;z-index:999;background:transparent;pointer-events:auto;'
+      overlay.classList.add('fleet-drop-zone')
+      overlay.addEventListener('dragover', (ev) => {
+        ev.preventDefault()
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+        overlay.classList.add('fleet-drop-hot')
+      })
+      overlay.addEventListener('dragleave', () => {
+        overlay.classList.remove('fleet-drop-hot')
+      })
+      overlay.addEventListener('drop', (ev) => {
+        ev.preventDefault()
+        overlay.classList.remove('fleet-drop-hot')
+        const raw = ev.dataTransfer?.getData('application/x-fleet-item')
+        if (!raw) return
+        let parsed: { kind: DrawerItem['kind']; key: string }
+        try { parsed = JSON.parse(raw) } catch { return }
+        const sourceItem: DrawerItem = {
+          kind: parsed.kind,
+          key: parsed.key,
+          title: '',
+          branch: null,
+        }
+        this.handleDrop(sourceItem, { kind: 'pane', paneId: entry.paneId })
+      })
+      paneEl.appendChild(overlay)
+      this.dragOverlays.push(overlay)
+    }
+  }
+
+  /** Tear down all drop-zone overlays. Idempotent. */
+  endDrag(): void {
+    for (const overlay of this.dragOverlays) {
+      try { overlay.parentElement?.removeChild(overlay) } catch { /* noop */ }
+    }
+    this.dragOverlays = []
+  }
+
+  /** Inject the drop-zone hot-state CSS into document <head> once. */
+  private ensureDropHotStyles(): void {
+    const id = 'fleet-drop-zone-styles'
+    if (document.getElementById(id)) return
+    const style = document.createElement('style')
+    style.id = id
+    style.textContent = `.fleet-drop-zone.fleet-drop-hot { outline: 2px solid #5179e0; outline-offset: -2px; }`
+    document.head.appendChild(style)
+  }
+
+  /**
+   * Unified drag-drop dispatcher. Source is always a DrawerItem (we only
+   * initiate drags from the drawer). Target is either another drawer item
+   * or a grid pane (via the dynamic drop-zone overlay).
+   */
+  handleDrop(
+    source: DrawerItem,
+    target: { kind: 'drawer'; item: DrawerItem } | { kind: 'pane'; paneId: string },
+  ): void {
+    this.endDrag()
+    const targetPaneId = target.kind === 'pane' ? target.paneId : target.item.key
+    const targetKind = target.kind === 'pane' ? 'alive' : target.item.kind
+    if (targetKind === 'exited') return
+    if (source.kind === 'exited') {
+      void this.relaunchAndSwapWith(source.key, targetPaneId)
+      return
+    }
+    this.swapPanes(source.key, targetPaneId)
+  }
+
+  /**
+   * Swap two panes by reordering paneRegistry. Map insertion order =
+   * grid-position order, so swapping the two entries' positions in the Map
+   * swaps their visible/parked slots. No PTY operations; tabs are reused.
+   */
+  swapPanes(idA: string, idB: string): void {
+    if (idA === idB) return
+    const entries = [...this.paneRegistry.values()]
+    const aIdx = entries.findIndex(e => e.paneId === idA)
+    const bIdx = entries.findIndex(e => e.paneId === idB)
+    if (aIdx < 0 || bIdx < 0) return
+    ;[entries[aIdx], entries[bIdx]] = [entries[bIdx], entries[aIdx]]
+    this.paneRegistry.clear()
+    for (const e of entries) this.paneRegistry.set(e.paneId, e)
+    this.rebuildGrid()
+  }
+
+  /**
+   * Relaunch an exited worktree as a fresh pane, then swap that new pane
+   * into the target's grid position (displacing the target into the parked
+   * pool / drawer).
+   */
+  async relaunchAndSwapWith(worktreePath: string, targetPaneId: string): Promise<void> {
+    const exited = this.exitedWorktrees.get(worktreePath)
+    if (!exited || !this.repoInfo) return
+    this.exitedWorktrees.delete(worktreePath)
+    this.userDismissed.delete(worktreePath)
+    let spawned: PaneEntry | null = null
+    try {
+      spawned = await this.addPaneForWorktree(exited.worktree, this.repoInfo)
+    } catch (err: any) {
+      this.exitedWorktrees.set(worktreePath, exited)
+      this.notify('error', `Failed to relaunch ${exited.title}`, String(err?.message ?? err))
+      this.rebuildGrid()
+      return
+    }
+    if (spawned) this.swapPanes(spawned.paneId, targetPaneId)
   }
 
   /**

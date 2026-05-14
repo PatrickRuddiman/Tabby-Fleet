@@ -1,5 +1,7 @@
 import { Component, HostBinding, Input } from '@angular/core'
 
+const DRAG_MIME = 'application/x-fleet-item'
+
 export interface DrawerItem {
   key: string
   title: string
@@ -32,7 +34,15 @@ export interface DrawerItem {
       <button *ngFor="let item of activeItems; trackBy: trackByKey"
               type="button"
               class="chip active"
+              draggable="true"
               (click)="select(item)"
+              (dragstart)="dragStart(item, $event)"
+              (dragend)="dragEnd($event)"
+              (dragover)="dragOver(item, $event)"
+              (dragleave)="dragLeave(item)"
+              (drop)="drop(item, $event)"
+              [class.drag-source]="isDragging(item)"
+              [class.drop-target]="isHovered(item) && isValidDropTarget(item)"
               [title]="chipTooltip(item)">
         {{ chipLabel(item) }}
       </button>
@@ -40,8 +50,16 @@ export interface DrawerItem {
       <button *ngFor="let item of inactiveItems; trackBy: trackByKey"
               type="button"
               class="chip"
+              draggable="true"
               [class.exited]="item.kind === 'exited'"
               (click)="select(item)"
+              (dragstart)="dragStart(item, $event)"
+              (dragend)="dragEnd($event)"
+              (dragover)="dragOver(item, $event)"
+              (dragleave)="dragLeave(item)"
+              (drop)="drop(item, $event)"
+              [class.drag-source]="isDragging(item)"
+              [class.drop-target]="isHovered(item) && isValidDropTarget(item)"
               [title]="chipTooltip(item)">
         {{ chipLabel(item) }}
       </button>
@@ -52,7 +70,15 @@ export interface DrawerItem {
         <div class="section-label">Active <span class="muted">({{ activeItems.length }})</span></div>
         <button *ngFor="let item of activeItems; trackBy: trackByKey"
                 type="button" class="card active"
+                draggable="true"
                 (click)="select(item)"
+                (dragstart)="dragStart(item, $event)"
+                (dragend)="dragEnd($event)"
+                (dragover)="dragOver(item, $event)"
+                (dragleave)="dragLeave(item)"
+                (drop)="drop(item, $event)"
+                [class.drag-source]="isDragging(item)"
+                [class.drop-target]="isHovered(item) && isValidDropTarget(item)"
                 title="Focus this pane">
           <div class="card-title">{{ item.title }}</div>
           <div class="card-branch">{{ item.branch || '(detached)' }}</div>
@@ -64,8 +90,16 @@ export interface DrawerItem {
         <div class="empty-state" *ngIf="inactiveItems.length === 0">No parked worktrees.</div>
         <button *ngFor="let item of inactiveItems; trackBy: trackByKey"
                 type="button" class="card"
+                draggable="true"
                 [class.exited]="item.kind === 'exited'"
                 (click)="select(item)"
+                (dragstart)="dragStart(item, $event)"
+                (dragend)="dragEnd($event)"
+                (dragover)="dragOver(item, $event)"
+                (dragleave)="dragLeave(item)"
+                (drop)="drop(item, $event)"
+                [class.drag-source]="isDragging(item)"
+                [class.drop-target]="isHovered(item) && isValidDropTarget(item)"
                 [title]="item.kind === 'exited' ? 'Relaunch this worktree' : 'Bring into the grid'">
           <div class="card-title">
             <span class="dot" [class.exited]="item.kind === 'exited'"></span>
@@ -182,6 +216,15 @@ export interface DrawerItem {
       border-color: rgba(217, 122, 85, 0.55);
       background: rgba(217, 122, 85, 0.10);
     }
+    :host .chip.drag-source, :host .card.drag-source {
+      opacity: 0.35;
+    }
+    :host .chip.drop-target {
+      box-shadow: 0 0 0 2px #5179e0 inset;
+    }
+    :host .card.drop-target {
+      box-shadow: 0 0 0 2px #5179e0;
+    }
     :host .chip-divider {
       width: 22px;
       height: 1px;
@@ -296,8 +339,15 @@ export class FleetWorktreeDrawerComponent {
   @Input() activeItems: DrawerItem[] = []
   @Input() inactiveItems: DrawerItem[] = []
   @Input() onSelect: (item: DrawerItem) => void = () => {}
+  @Input() onDragStart: (item: DrawerItem) => void = () => {}
+  @Input() onDragEnd: () => void = () => {}
+  @Input() onDrop: (source: DrawerItem, target: DrawerItem) => void = () => {}
 
   expanded = false
+  draggedKey: string | null = null
+  draggedKind: DrawerItem['kind'] | null = null
+  hoveredKey: string | null = null
+  hoveredKind: DrawerItem['kind'] | null = null
 
   @HostBinding('attr.expanded') get expandedAttr(): string | null {
     return this.expanded ? 'true' : null
@@ -324,10 +374,75 @@ export class FleetWorktreeDrawerComponent {
       : item.kind === 'alive-parked'
         ? 'Click to bring into grid'
         : 'Click to focus'
-    return `${item.title} (${item.branch || 'detached'}) — ${action}`
+    return `${item.title} (${item.branch || 'detached'}) — ${action} · drag to swap`
   }
 
   trackByKey(_index: number, item: DrawerItem): string {
     return `${item.kind}:${item.key}`
+  }
+
+  isDragging(item: DrawerItem): boolean {
+    return this.draggedKey === item.key && this.draggedKind === item.kind
+  }
+
+  isHovered(item: DrawerItem): boolean {
+    return this.hoveredKey === item.key && this.hoveredKind === item.kind
+  }
+
+  isValidDropTarget(target: DrawerItem): boolean {
+    if (this.draggedKey === null) return false
+    if (target.kind === 'exited') return false
+    if (target.key === this.draggedKey && target.kind === this.draggedKind) return false
+    return true
+  }
+
+  dragStart(item: DrawerItem, ev: DragEvent): void {
+    this.draggedKey = item.key
+    this.draggedKind = item.kind
+    if (ev.dataTransfer) {
+      ev.dataTransfer.setData(DRAG_MIME, JSON.stringify({ kind: item.kind, key: item.key }))
+      ev.dataTransfer.effectAllowed = 'move'
+    }
+    this.onDragStart(item)
+  }
+
+  dragEnd(_ev: DragEvent): void {
+    this.draggedKey = null
+    this.draggedKind = null
+    this.hoveredKey = null
+    this.hoveredKind = null
+    this.onDragEnd()
+  }
+
+  dragOver(item: DrawerItem, ev: DragEvent): void {
+    if (!this.isValidDropTarget(item)) return
+    ev.preventDefault()
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+    this.hoveredKey = item.key
+    this.hoveredKind = item.kind
+  }
+
+  dragLeave(item: DrawerItem): void {
+    if (this.hoveredKey === item.key && this.hoveredKind === item.kind) {
+      this.hoveredKey = null
+      this.hoveredKind = null
+    }
+  }
+
+  drop(target: DrawerItem, ev: DragEvent): void {
+    ev.preventDefault()
+    this.hoveredKey = null
+    this.hoveredKind = null
+    if (!ev.dataTransfer) return
+    const raw = ev.dataTransfer.getData(DRAG_MIME)
+    if (!raw) return
+    let parsed: { kind: DrawerItem['kind']; key: string }
+    try { parsed = JSON.parse(raw) } catch { return }
+    const all = [...this.activeItems, ...this.inactiveItems]
+    const source = all.find(i => i.kind === parsed.kind && i.key === parsed.key)
+    if (!source) return
+    if (target.kind === 'exited') return
+    if (source.key === target.key && source.kind === target.kind) return
+    this.onDrop(source, target)
   }
 }
