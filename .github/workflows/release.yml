@@ -64,6 +64,13 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Upgrade npm CLI to support OIDC trusted publishing
+        if: steps.tag_check.outputs.exists == 'false'
+        # Node 20 ships npm 10.x; trusted-publisher OIDC support landed in
+        # npm 11.5.1. Pin a recent npm so `npm publish` mints the OIDC token
+        # itself instead of falling back to NODE_AUTH_TOKEN (which is empty).
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         if: steps.tag_check.outputs.exists == 'false'
         run: npm ci
